@@ -1,6 +1,7 @@
 //! Core logic for Tulis: the document model, editing operations, storage, vim and AI.
 
 pub mod alternates;
+pub mod config;
 pub mod edit;
 pub mod ghost;
 pub mod history;
