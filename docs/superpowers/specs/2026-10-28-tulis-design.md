@@ -64,7 +64,8 @@ AiKind       = Rewrite | Trim
 Invariants:
 
 - Every `Paragraph` has at least one version, and `active` is a valid index.
-- Every `Alt` has at least one option, and `active` is a valid index.
+- Every `Alt` has at least one option, and `active` is a valid index. An `Alt` whose active option
+  is empty exists only while the editor is editing that group (see the alternate-editing state).
 - Nesting is limited to two levels: paragraph versions contain segments, and alt options are flat strings.
 - No empty `Plain` segments, except a lone empty `Plain` in an empty paragraph.
 - Adjacent `Plain` segments with the same `ghost` flag are merged (normalization runs after every operation).
@@ -93,6 +94,15 @@ segment, and its inverse maps back. Positions use bytes (matching GPUI's
   a single string, which becomes option 1 (`Human`); a copy becomes option 2, and option 2 is active.
   A selection that already lies exactly on one `Alt` adds a new option (a copy of the active one)
   to that group instead.
+- **Alternate-editing state** (lives in the editor, core provides the operations): after `make_alt`,
+  the new option's text is selected and the editor is *editing* that group. While editing, typing,
+  Backspace and Delete within the group's span (edges included) edit the active option via
+  `edit_alt(para, seg, local_range, text)`, and the option may become empty. Typing strictly inside an
+  existing alternate also enters this state. It ends when the selection leaves the group's span
+  (arrows, click, vim motions), on Esc, Accept, undo/redo, or an edit outside the span. When it ends, `finish_alt_edit` removes an
+  empty active option (showing the previous one), and a group left with a single option becomes
+  plain text. The edited group is found again by `alt_starting_at(start offset)`, because only the
+  edited group can ever be empty.
 - `make_para_version(para)`: clones the active version as a new active version.
 - `cycle(pos, dir)`: if `pos` is inside an `Alt` or at either edge of one (for cycling and
   accepting, edges count as inside; the preceding `Alt` wins if two are adjacent), cycles its options. Otherwise, if the paragraph has
@@ -151,12 +161,13 @@ notice or error message.
 
 **Custom text element:**
 
-- For each paragraph, builds `TextRun`s from segments: normal color; ghost at 10% alpha; a dotted
-  underline on `Alt` segments; a dotted underline in a different tint when the active option is
-  AI-sourced; and a red strikethrough overlay on trim suggestions.
-- Shapes each paragraph with the GPUI text system into wrapped lines at the column width, and caches
-  the layouts per paragraph (invalidated when the paragraph or the width changes).
-- Paints the selection, then the text, then the cursor (a blinking bar in Insert, a block in vim Normal).
+- For each paragraph, builds `TextRun`s from segments: normal color; ghost at 10% alpha; a thin
+  low-contrast underline on `Alt` segments (GPUI underlines are solid or wavy only, not dotted); a
+  violet underline when the active option is AI-sourced; and a red strikethrough on trim suggestions.
+- Shapes each paragraph with the GPUI text system into wrapped lines at the column width. GPUI's
+  text system already caches shaped lines between frames, so the element just reshapes every frame.
+  The editor keeps the last frame's layouts for hit-testing and vertical movement.
+- Paints the selection, then the text, then the cursor (a 2px bar, or a translucent block in vim Normal/Visual).
 - Mouse: click to place the cursor, drag to select, double-click to select a word, triple-click
   to select a paragraph. Hit-testing uses the cached layouts.
 - Implements `EntityInputHandler`, which covers text insertion and IME marked text (rendered underlined).
@@ -231,13 +242,18 @@ pub trait LlmProvider: Send + Sync {
 CompletionRequest { system: String, user: String, max_tokens: u32 }
 ```
 
-- `AnthropicProvider`: `POST https://api.anthropic.com/v1/messages` with the headers `x-api-key`
-  and `anthropic-version: 2023-06-01`; takes the text of the first content block.
+- `AnthropicProvider`: `POST https://api.anthropic.com/v1/messages` with the headers `x-api-key`,
+  `anthropic-version: 2026-10-21` and `content-type: application/json`. The body is `model`,
+  `max_tokens` (4096), `system` and a single user message, with no sampling parameters (the
+  `2026-10-21` API version rejects them). It checks `stop_reason` first: `"refusal"` maps to
+  `AiError::Refused`. Otherwise it takes the text of the first `type == "text"` content block
+  (thinking blocks may come before it).
 - `OpenAiCompatProvider`: `POST {base_url}/chat/completions` with `Authorization: Bearer`; takes
   `choices[0].message.content`.
 - HTTP via `ureq` (blocking), 30s timeout. The app runs `complete` on the GPUI background executor.
   Cancelling drops the task, and its result is ignored.
-- `AiError`: `MissingKey(env_var)`, `Http(status, body excerpt)`, `Network(msg)`, `Parse(msg)`.
+- `AiError`: `MissingKey(env_var)`, `Http(status, body excerpt)`, `Network(msg)`, `Parse(msg)`,
+  `Refused`, `Config(msg)`.
 
 **Alternates prompt** (`prompts::alternates`): the system prompt asks for N alternative phrasings of
 the target text that fit the surrounding paragraph, keeping meaning and voice, and returned as a
