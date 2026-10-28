@@ -2,13 +2,16 @@
 
 use std::path::{Path, PathBuf};
 
-use gpui::{App, ClickEvent, Context, Entity, Focusable, Window, div, prelude::*, px};
+use gpui::{
+    App, ClickEvent, Context, Entity, Focusable, PathPromptOptions, PromptLevel, Window, div,
+    prelude::*, px,
+};
 use tulis_core::alternates::AltLevel;
 use tulis_core::config::Config;
 use tulis_core::storage;
 use tulis_core::{Document, OverflowId};
 
-use crate::actions::ToggleOverflowPanel;
+use crate::actions::{New, Open, Quit, Save, SaveAs, ToggleOverflowPanel};
 use crate::editor::Editor;
 use crate::theme;
 
@@ -31,7 +34,7 @@ impl Workspace {
         config: Config,
         warning: Option<String>,
         path: Option<PathBuf>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(|cx| Editor::new(config, Document::new(), cx));
@@ -51,6 +54,10 @@ impl Workspace {
                 .editor
                 .update(cx, |e, cx| e.set_notice(warning, cx));
         }
+        let handle = cx.entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            handle.update(cx, |ws, cx| ws.request_close(window, cx))
+        });
         workspace
     }
 
@@ -238,6 +245,11 @@ impl Render for Workspace {
             .bg(theme::paper())
             .text_color(theme::ink())
             .on_action(cx.listener(Self::toggle_overflow))
+            .on_action(cx.listener(Self::save))
+            .on_action(cx.listener(Self::save_as))
+            .on_action(cx.listener(Self::open))
+            .on_action(cx.listener(Self::new_file))
+            .on_action(cx.listener(Self::quit))
             .children(
                 self.banner
                     .clone()
@@ -273,5 +285,205 @@ impl Render for Workspace {
                     }),
             )
             .child(self.render_status(cx))
+    }
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+impl Workspace {
+    /// Save to the current path. Returns false when there is no path yet or saving failed.
+    pub(crate) fn save_now(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(path) = self.path.clone() else {
+            return false;
+        };
+        let result = storage::save(&self.editor.read(cx).doc, &path);
+        match result {
+            Ok(()) => {
+                self.banner = None;
+                self.editor.update(cx, |e, cx| {
+                    e.dirty = false;
+                    e.set_notice(format!("Saved {}", file_name(&path)), cx);
+                });
+                true
+            }
+            Err(e) => {
+                self.banner = Some(format!("Could not save {}: {e}", path.display()));
+                cx.notify();
+                false
+            }
+        }
+    }
+
+    fn save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
+        if self.path.is_none() {
+            self.save_as(&SaveAs, window, cx);
+        } else {
+            self.save_now(cx);
+        }
+    }
+
+    fn save_as(&mut self, _: &SaveAs, window: &mut Window, cx: &mut Context<Self>) {
+        let dir = self
+            .path
+            .as_ref()
+            .and_then(|p| p.parent().map(Path::to_path_buf))
+            .or_else(home_dir)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let suggested = self
+            .path
+            .as_deref()
+            .map(file_name)
+            .unwrap_or_else(|| "untitled.md".into());
+        let answer = cx.prompt_for_new_path(&dir, Some(&suggested));
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(mut path))) = answer.await else {
+                return;
+            };
+            if path.extension().is_none() {
+                path.set_extension("md");
+            }
+            this.update(cx, |ws, cx| {
+                ws.path = Some(path);
+                ws.save_now(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn open(&mut self, _: &Open, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm_discard(window, cx, |_, window, cx| {
+            let answer = cx.prompt_for_paths(PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: false,
+                prompt: None,
+            });
+            cx.spawn_in(window, async move |this, cx| {
+                let Ok(Ok(Some(paths))) = answer.await else {
+                    return;
+                };
+                let Some(path) = paths.into_iter().next() else {
+                    return;
+                };
+                this.update(cx, |ws, cx| ws.open_path(path, cx)).ok();
+            })
+            .detach();
+        });
+    }
+
+    fn new_file(&mut self, _: &New, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm_discard(window, cx, |ws, _, cx| {
+            ws.path = None;
+            ws.banner = None;
+            ws.editor.update(cx, |e, cx| e.load(Document::new(), cx));
+        });
+    }
+
+    fn quit(&mut self, _: &Quit, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm_discard(window, cx, |_, _, cx| cx.quit());
+    }
+
+    /// Called when the window is about to close. Returns whether it may close now.
+    fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.editor.read(cx).dirty {
+            return true;
+        }
+        self.confirm_discard(window, cx, |_, window, _| window.remove_window());
+        false
+    }
+
+    /// Run `then` now if there are no unsaved changes; otherwise ask Save / Don't Save / Cancel.
+    /// Choosing Save on an untitled document opens Save As and does not continue.
+    fn confirm_discard(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        if !self.editor.read(cx).dirty {
+            then(self, window, cx);
+            return;
+        }
+        let answer = window.prompt(
+            PromptLevel::Warning,
+            "Save changes to this document?",
+            None,
+            &["Save", "Don't Save", "Cancel"],
+            cx,
+        );
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(choice) = answer.await else { return };
+            this.update_in(cx, |ws, window, cx| match choice {
+                0 if ws.path.is_none() => ws.save_as(&SaveAs, window, cx),
+                0 => {
+                    if ws.save_now(cx) {
+                        then(ws, window, cx);
+                    }
+                }
+                1 => then(ws, window, cx),
+                _ => {}
+            })
+            .ok();
+        })
+        .detach();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{EntityInputHandler, TestAppContext};
+    use tulis_core::config::Config;
+    use tulis_core::{DocPos, Selection};
+
+    use super::Workspace;
+
+    #[gpui::test]
+    fn opens_command_line_path_and_saves(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("essay.md");
+        std::fs::write(&path, "Hello.\n").unwrap();
+        let open_path = path.clone();
+        let (ws, cx) = cx.add_window_view(move |window, cx| {
+            Workspace::new(Config::default(), None, Some(open_path), window, cx)
+        });
+        let text = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.paragraphs[0].text());
+        assert_eq!(text, "Hello.");
+        ws.update_in(cx, |ws, window, cx| {
+            ws.editor.update(cx, |e, cx| {
+                e.selection = Selection::caret(DocPos::new(0, 6));
+                e.replace_text_in_range(None, " Bye.", window, cx);
+            });
+            assert!(ws.save_now(cx));
+            assert!(!ws.editor.read(cx).dirty);
+        });
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "Hello. Bye.\n");
+        assert!(tulis_core::storage::sidecar_path(&path).exists());
+    }
+
+    #[gpui::test]
+    fn missing_path_starts_a_new_file_there(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("new.md");
+        let open_path = path.clone();
+        let (ws, cx) = cx.add_window_view(move |window, cx| {
+            Workspace::new(Config::default(), None, Some(open_path), window, cx)
+        });
+        assert_eq!(
+            ws.read_with(cx, |ws, _| ws.path.clone()),
+            Some(path.clone())
+        );
+        ws.update_in(cx, |ws, _, cx| assert!(ws.save_now(cx)));
+        assert!(path.exists());
+    }
+
+    #[gpui::test]
+    fn save_without_path_reports_false(cx: &mut TestAppContext) {
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        ws.update_in(cx, |ws, _, cx| assert!(!ws.save_now(cx)));
     }
 }
