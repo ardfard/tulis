@@ -1,5 +1,8 @@
 //! Vim mode: a key-by-key state machine that produces abstract editor commands.
 
+/// Upper bound for any count the machine produces, whether typed or multiplied.
+pub const MAX_COUNT: usize = 10_000;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VimKey {
     Char(char),
@@ -186,7 +189,10 @@ impl Vim {
     }
 
     fn count(&self) -> usize {
-        self.count.unwrap_or(1) * self.op.and_then(|(_, c)| c).unwrap_or(1)
+        self.count
+            .unwrap_or(1)
+            .saturating_mul(self.op.and_then(|(_, c)| c).unwrap_or(1))
+            .min(MAX_COUNT)
     }
 
     fn feed_char(&mut self, c: char) -> Vec<VimCommand> {
@@ -199,7 +205,8 @@ impl Vim {
                     .count
                     .unwrap_or(0)
                     .saturating_mul(10)
-                    .saturating_add(digit as usize);
+                    .saturating_add(digit as usize)
+                    .min(MAX_COUNT);
                 self.count = Some(n);
                 return Vec::new();
             }
@@ -550,6 +557,23 @@ mod tests {
             vec![Move {
                 motion: WordForward,
                 count: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn huge_counts_saturate_and_cap() {
+        let mut v = Vim::new();
+        let nines = "9".repeat(20);
+        assert!(feed(&mut v, &nines).is_empty());
+        assert!(feed(&mut v, "d").is_empty());
+        assert!(feed(&mut v, "2").is_empty());
+        assert_eq!(
+            feed(&mut v, "w"),
+            vec![Operate {
+                op: Delete,
+                motion: WordForward,
+                count: MAX_COUNT
             }]
         );
     }
