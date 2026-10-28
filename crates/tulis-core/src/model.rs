@@ -213,8 +213,6 @@ impl Paragraph {
                 .any(|v| v.segments.iter().any(|s| s.ghost || s.is_alt()))
     }
 
-    // Called by later tasks (accepting an alternate); unused until then.
-    #[allow(dead_code)]
     pub(crate) fn keep_only_active_version(&mut self) {
         let version = self.versions[self.active].clone();
         self.versions = vec![version];
