@@ -282,10 +282,10 @@ font_family = "Iowan Old Style"
 font_size = 18
 
 [ai]
-provider = "anthropic"            # "anthropic" | "openai"
-model = "claude-haiku-5-5"
-api_key_env = "ANTHROPIC_API_KEY"
-base_url = ""                     # required for "openai"
+provider = "openai"               # "openai" (any OpenAI-compatible endpoint) | "anthropic"
+model = "openrouter/auto"         # OpenRouter's auto-router; set any OpenRouter model id
+api_key_env = "OPENROUTER_API_KEY"
+base_url = "https://openrouter.ai/api/v1"  # required for "openai"; optional override for "anthropic"
 num_alternates = 3
 ```
 
@@ -296,7 +296,7 @@ status-bar warning. API keys are only read from the named environment variable.
 
 | Situation | Behavior |
 |---|---|
-| Missing API key | status: "Set $ANTHROPIC_API_KEY to use AI"; nothing else changes |
+| Missing API key | status: "Set $OPENROUTER_API_KEY to use AI"; nothing else changes |
 | AI HTTP/network/parse error | status message; document unchanged |
 | Stale AI result | discarded; status notice |
 | Save fails | error banner; dirty flag kept; previous files intact (atomic rename) |
