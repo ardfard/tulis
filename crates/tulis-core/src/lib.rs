@@ -7,6 +7,7 @@ pub mod history;
 pub mod model;
 pub mod overflow;
 pub mod pos;
+pub mod storage;
 
 pub use alternates::{AltInfo, AltLevel, OpError};
 pub use model::*;
