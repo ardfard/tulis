@@ -3,6 +3,7 @@
 pub mod alternates;
 pub mod edit;
 pub mod ghost;
+pub mod history;
 pub mod model;
 pub mod overflow;
 pub mod pos;
