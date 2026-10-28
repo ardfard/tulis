@@ -10,6 +10,7 @@ pub mod motion;
 pub mod overflow;
 pub mod pos;
 pub mod storage;
+pub mod vim;
 
 pub use alternates::{AltInfo, AltLevel, OpError};
 pub use model::*;
