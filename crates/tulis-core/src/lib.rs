@@ -6,6 +6,7 @@ pub mod edit;
 pub mod ghost;
 pub mod history;
 pub mod model;
+pub mod motion;
 pub mod overflow;
 pub mod pos;
 pub mod storage;
