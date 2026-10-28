@@ -151,3 +151,35 @@ fn ime_marked_text_is_replaced_on_commit(cx: &mut TestAppContext) {
     });
     assert_eq!(texts(&editor, cx), vec!["か"]);
 }
+
+#[gpui::test]
+fn undo_never_restores_an_empty_alternate(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    editor.update(cx, |e, _| {
+        e.doc.make_alt(0, 2..6).unwrap();
+        e.selection = Selection {
+            anchor: DocPos::new(0, 2),
+            head: DocPos::new(0, 6),
+        };
+        e.alt_edit = Some(AltEdit {
+            para_id: e.doc.paragraphs[0].id,
+            start: 2,
+        });
+    });
+    editor.update_in(cx, |e, window, cx| e.backspace(&Backspace, window, cx));
+    type_str(&editor, cx, "x");
+    for _ in 0..3 {
+        editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+        editor.read_with(cx, |e, _| {
+            assert!(e.alt_edit.is_none());
+            for p in &e.doc.paragraphs {
+                assert!(
+                    p.segments()
+                        .iter()
+                        .all(|s| !(s.is_alt() && s.text().is_empty())),
+                    "empty alternate restored"
+                );
+            }
+        });
+    }
+}

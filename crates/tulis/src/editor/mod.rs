@@ -322,6 +322,7 @@ impl Editor {
     }
 
     pub(crate) fn undo_steps(&mut self, count: usize, cx: &mut Context<Self>) {
+        self.finish_alt_edit();
         for _ in 0..count.max(1) {
             let current = (self.doc.clone(), self.selection);
             let Some((doc, selection)) = self.history.undo(current) else {
@@ -334,6 +335,7 @@ impl Editor {
     }
 
     pub(crate) fn redo_steps(&mut self, count: usize, cx: &mut Context<Self>) {
+        self.finish_alt_edit();
         for _ in 0..count.max(1) {
             let current = (self.doc.clone(), self.selection);
             let Some((doc, selection)) = self.history.redo(current) else {
@@ -347,6 +349,21 @@ impl Editor {
 
     fn after_history(&mut self, cx: &mut Context<Self>) {
         self.alt_edit = None;
+        // A restored snapshot may hold an alternate whose active option is empty.
+        for para in 0..self.doc.paragraphs.len() {
+            for seg in (0..self.doc.paragraphs[para].segments().len()).rev() {
+                let Some(segment) = self.doc.paragraphs[para].segments().get(seg) else {
+                    continue;
+                };
+                if segment.is_alt() && segment.text().is_empty() {
+                    self.doc.finish_alt_edit(para, seg);
+                }
+            }
+        }
+        self.selection = Selection {
+            anchor: self.doc.clamp(self.selection.anchor),
+            head: self.doc.clamp(self.selection.head),
+        };
         self.trims.clear();
         self.marked = None;
         self.goal_x = None;
