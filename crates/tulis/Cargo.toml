@@ -1,0 +1,14 @@
+[package]
+name = "tulis"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+chrono = "0.4.45"
+gpui = "0.2.2"
+tulis-core = { version = "0.1.0", path = "../tulis-core" }
+unicode-segmentation = "1.13.3"
+
+[dev-dependencies]
+gpui = { version = "0.2.2", features = ["test-support"] }
+tempfile = "3.27.0"
