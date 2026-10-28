@@ -2,6 +2,7 @@
 
 mod actions;
 mod element;
+mod features;
 mod input;
 pub mod layout;
 #[cfg(test)]
@@ -409,6 +410,15 @@ impl Render for Editor {
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
+            .on_action(cx.listener(Self::make_alternate))
+            .on_action(cx.listener(Self::cycle_next))
+            .on_action(cx.listener(Self::cycle_prev))
+            .on_action(cx.listener(Self::accept_alternate))
+            .on_action(cx.listener(Self::delete_alternate))
+            .on_action(cx.listener(Self::toggle_ghost))
+            .on_action(cx.listener(Self::send_to_overflow))
+            .on_action(cx.listener(Self::accept_trim))
+            .on_action(cx.listener(Self::cancel))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))

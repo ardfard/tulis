@@ -2,8 +2,9 @@ use gpui::{Entity, EntityInputHandler, TestAppContext, VisualTestContext};
 use tulis_core::config::Config;
 use tulis_core::{DocPos, Document, Selection};
 
-use super::{AltEdit, Editor};
+use super::{AltEdit, Editor, TrimSuggestion};
 use crate::actions::*;
+use tulis_core::OverflowId;
 
 pub(crate) fn editor_with<'a>(
     cx: &'a mut TestAppContext,
@@ -182,4 +183,105 @@ fn undo_never_restores_an_empty_alternate(cx: &mut TestAppContext) {
             }
         });
     }
+}
+
+#[gpui::test]
+fn make_alternate_then_type_new_wording_and_cycle_back(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    select(&editor, cx, DocPos::new(0, 2), DocPos::new(0, 6));
+    editor.update_in(cx, |e, window, cx| {
+        e.make_alternate(&MakeAlternate, window, cx)
+    });
+    type_str(&editor, cx, "adore");
+    assert_eq!(texts(&editor, cx), vec!["I adore tea"]);
+    editor.update_in(cx, |e, window, cx| e.cycle_prev(&CyclePrev, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["I love tea"]);
+    editor.update_in(cx, |e, window, cx| e.cycle_next(&CycleNext, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["I adore tea"]);
+    editor.update_in(cx, |e, window, cx| {
+        e.accept_alternate(&AcceptAlternate, window, cx)
+    });
+    assert!(editor.read_with(cx, |e, _| !e.doc.paragraphs[0].has_metadata()));
+}
+
+#[gpui::test]
+fn make_alternate_without_selection_creates_paragraph_version(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Draft one."]);
+    editor.update_in(cx, |e, window, cx| {
+        e.make_alternate(&MakeAlternate, window, cx)
+    });
+    editor.update_in(cx, |e, window, cx| {
+        e.select_all(&SelectAll, window, cx);
+        e.replace_text_in_range(None, "Draft two.", window, cx);
+    });
+    assert_eq!(texts(&editor, cx), vec!["Draft two."]);
+    editor.update_in(cx, |e, window, cx| e.cycle_next(&CycleNext, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["Draft one."]);
+    editor.update_in(cx, |e, window, cx| {
+        e.delete_alternate(&DeleteAlternate, window, cx)
+    });
+    assert_eq!(texts(&editor, cx), vec!["Draft two."]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.paragraphs[0].versions.len()),
+        1
+    );
+}
+
+#[gpui::test]
+fn ghost_toggle_on_paragraph_and_selection(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Keep. Maybe cut."]);
+    select(&editor, cx, DocPos::new(0, 5), DocPos::new(0, 16));
+    editor.update_in(cx, |e, window, cx| e.toggle_ghost(&ToggleGhost, window, cx));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.paragraphs[0].export_text()),
+        "Keep."
+    );
+    editor.update_in(cx, |e, window, cx| e.toggle_ghost(&ToggleGhost, window, cx));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.paragraphs[0].export_text()),
+        "Keep. Maybe cut."
+    );
+    select(&editor, cx, DocPos::new(0, 0), DocPos::new(0, 0));
+    editor.update_in(cx, |e, window, cx| e.toggle_ghost(&ToggleGhost, window, cx));
+    assert_eq!(editor.read_with(cx, |e, _| e.doc.word_count()), 0);
+}
+
+#[gpui::test]
+fn overflow_round_trip(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["a", "b"]);
+    editor.update_in(cx, |e, window, cx| {
+        e.send_to_overflow(&SendToOverflow, window, cx)
+    });
+    assert_eq!(texts(&editor, cx), vec!["b"]);
+    let id: OverflowId = editor.read_with(cx, |e, _| e.doc.overflow[0].id);
+    editor.update(cx, |e, cx| e.insert_overflow(id, true, cx));
+    assert_eq!(texts(&editor, cx), vec!["ab"]);
+    assert!(editor.read_with(cx, |e, _| e.doc.overflow.is_empty()));
+}
+
+#[gpui::test]
+fn accepting_a_trim_ghosts_it_and_escape_dismisses(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea, really."]);
+    editor.update(cx, |e, _| {
+        let id = e.doc.paragraphs[0].id;
+        e.trims = vec![
+            TrimSuggestion {
+                para_id: id,
+                range: 2..9,
+            }, // "really "
+            TrimSuggestion {
+                para_id: id,
+                range: 18..25,
+            }, // " really"
+        ];
+    });
+    // The cursor is at (0,0): the next suggestion at/after it is 2..9.
+    editor.update_in(cx, |e, window, cx| e.accept_trim(&AcceptTrim, window, cx));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.paragraphs[0].export_text()),
+        "I love tea, really."
+    );
+    assert_eq!(editor.read_with(cx, |e, _| e.trims.len()), 1);
+    editor.update_in(cx, |e, window, cx| e.cancel(&Cancel, window, cx));
+    assert!(editor.read_with(cx, |e, _| e.trims.is_empty()));
 }
