@@ -17,6 +17,8 @@ pub enum StorageError {
     Io(#[from] io::Error),
     #[error("could not encode sidecar: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("file is not valid UTF-8 text")]
+    NotUtf8,
 }
 
 #[derive(Debug)]
@@ -117,7 +119,8 @@ pub fn save(doc: &Document, md_path: &Path) -> Result<(), StorageError> {
 
 pub fn open(md_path: &Path) -> Result<Opened, StorageError> {
     let bytes = fs::read(md_path)?;
-    let texts = parse_markdown(&String::from_utf8_lossy(&bytes));
+    let md = std::str::from_utf8(&bytes).map_err(|_| StorageError::NotUtf8)?;
+    let texts = parse_markdown(md);
     let mut notices = Vec::new();
     let document = match read_sidecar(&sidecar_path(md_path), &mut notices) {
         None => Document::from_texts(&texts),
@@ -349,6 +352,16 @@ mod tests {
             opened.notices,
             vec!["Ignoring sidecar with unknown format version 99".to_string()]
         );
+    }
+
+    #[test]
+    fn open_non_utf8_file_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("latin1.md");
+        fs::write(&path, b"caf\xe9\n").unwrap();
+        let err = open(&path).unwrap_err();
+        assert!(matches!(err, StorageError::NotUtf8));
+        assert_eq!(err.to_string(), "file is not valid UTF-8 text");
     }
 
     #[test]
