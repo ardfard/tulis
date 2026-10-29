@@ -1,6 +1,7 @@
 //! The editor: owns the document, selection and history, and renders through `EditorElement`.
 
 mod actions;
+pub(crate) mod ai;
 mod element;
 mod features;
 mod input;
@@ -418,6 +419,9 @@ impl Render for Editor {
             .on_action(cx.listener(Self::toggle_ghost))
             .on_action(cx.listener(Self::send_to_overflow))
             .on_action(cx.listener(Self::accept_trim))
+            .on_action(cx.listener(Self::ai_alternates))
+            .on_action(cx.listener(Self::ai_trim_paragraph))
+            .on_action(cx.listener(Self::ai_trim_document))
             .on_action(cx.listener(Self::cancel))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))

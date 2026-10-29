@@ -285,3 +285,93 @@ fn accepting_a_trim_ghosts_it_and_escape_dismisses(cx: &mut TestAppContext) {
     editor.update_in(cx, |e, window, cx| e.cancel(&Cancel, window, cx));
     assert!(editor.read_with(cx, |e, _| e.trims.is_empty()));
 }
+
+use std::sync::Arc;
+use tulis_core::ai::MockProvider;
+
+fn with_mock(editor: &Entity<Editor>, cx: &mut VisualTestContext, responses: Vec<&str>) {
+    let responses = responses.into_iter().map(|r| Ok(r.to_string())).collect();
+    editor.update(cx, |e, _| {
+        e.provider_override = Some(Arc::new(MockProvider::new(responses)))
+    });
+}
+
+#[gpui::test]
+fn ai_alternates_for_selection_are_ai_marked(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    with_mock(&editor, cx, vec![r#"["adore", "like"]"#]);
+    select(&editor, cx, DocPos::new(0, 2), DocPos::new(0, 6));
+    editor.update_in(cx, |e, window, cx| {
+        e.ai_alternates(&AiAlternates, window, cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["I adore tea"]);
+    editor.read_with(cx, |e, _| {
+        assert!(e.doc.paragraphs[0].segments()[1].active_is_ai());
+        assert!(e.ai_task.is_none());
+    });
+}
+
+#[gpui::test]
+fn ai_alternates_without_selection_add_paragraph_versions(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Tea is nice."]);
+    with_mock(&editor, cx, vec![r#"["Tea is lovely.", "I like tea."]"#]);
+    editor.update_in(cx, |e, window, cx| {
+        e.ai_alternates(&AiAlternates, window, cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["Tea is lovely."]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.paragraphs[0].versions.len()),
+        3
+    );
+}
+
+#[gpui::test]
+fn stale_ai_result_is_dropped(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    with_mock(&editor, cx, vec![r#"["adore"]"#]);
+    select(&editor, cx, DocPos::new(0, 2), DocPos::new(0, 6));
+    editor.update_in(cx, |e, window, cx| {
+        e.ai_alternates(&AiAlternates, window, cx);
+        e.selection = Selection::caret(DocPos::new(0, 0));
+        e.replace_text_in_range(None, "X", window, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["XI love tea"]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.notice.clone()),
+        Some(super::ai::STALE_NOTICE.to_string())
+    );
+}
+
+#[gpui::test]
+fn ai_trim_suggests_cuts_that_tab_accepts(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea."]);
+    with_mock(&editor, cx, vec![r#"["really "]"#]);
+    editor.update_in(cx, |e, window, cx| {
+        e.ai_trim_paragraph(&AiTrimParagraph, window, cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(editor.read_with(cx, |e, _| e.trims.clone()).len(), 1);
+    editor.update_in(cx, |e, window, cx| e.accept_trim(&AcceptTrim, window, cx));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.paragraphs[0].export_text()),
+        "I love tea."
+    );
+}
+
+#[gpui::test]
+fn missing_api_key_is_reported(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    editor.update(cx, |e, _| {
+        e.config.ai.api_key_env = "TULIS_TEST_NO_SUCH_KEY".into()
+    });
+    editor.update_in(cx, |e, window, cx| {
+        e.ai_alternates(&AiAlternates, window, cx)
+    });
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.notice.clone()),
+        Some("Set $TULIS_TEST_NO_SUCH_KEY to use AI".to_string())
+    );
+}
