@@ -47,6 +47,8 @@ impl Editor {
             Ok(target) => target,
             Err(e) => return self.set_notice(e.to_string(), cx),
         };
+        // Rewrite whole groups: part of an alternate stands for all of it.
+        let range = self.doc.paragraphs[para].expand_to_alt_boundaries(range);
         let whole_paragraph = self.selection.is_empty();
         let (original, export, para_id) = {
             let p = &self.doc.paragraphs[para];

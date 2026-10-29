@@ -514,3 +514,23 @@ fn delete_at_emptied_alternate_deletes_after_restored_text(cx: &mut TestAppConte
     editor.update_in(cx, |e, window, cx| e.delete(&Delete, window, cx));
     assert_eq!(texts(&editor, cx), vec!["Hello world"]);
 }
+
+#[gpui::test]
+fn ai_alternates_on_part_of_a_group_rewrite_the_whole_group(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["a quick brown fox"]);
+    let mock = Arc::new(MockProvider::new(vec![Ok(r#"["tan"]"#.to_string())]));
+    editor.update(cx, |e, _| {
+        e.doc.make_alt(0, 2..13).unwrap();
+        e.provider_override = Some(mock.clone());
+    });
+    select(&editor, cx, DocPos::new(0, 8), DocPos::new(0, 13));
+    editor.update_in(cx, |e, window, cx| {
+        e.ai_alternates(&AiAlternates, window, cx)
+    });
+    cx.run_until_parked();
+    let request = mock.requests.lock().unwrap()[0].clone();
+    assert!(request.user.ends_with("Passage to rewrite:\nquick brown"));
+    assert_eq!(texts(&editor, cx), vec!["a tan fox"]);
+    let info = editor.read_with(cx, |e, _| e.doc.alt_info(DocPos::new(0, 3)).unwrap());
+    assert_eq!(info.count, 3, "existing options are kept");
+}
