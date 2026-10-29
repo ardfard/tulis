@@ -1,4 +1,5 @@
-//! Turn a paragraph's spans, trim suggestions and IME marked range into GPUI text runs.
+//! Turn a paragraph's spans, trim suggestions, IME marked range and `# ` title marker into GPUI
+//! text runs.
 
 use std::ops::Range;
 
@@ -7,6 +8,8 @@ use tulis_core::Span;
 
 pub struct RunStyle {
     pub font: Font,
+    /// The font of a `# ` title paragraph (bold).
+    pub title_font: Font,
     pub color: Hsla,
     pub alt_underline: Hsla,
     pub ai_underline: Hsla,
@@ -19,9 +22,11 @@ pub fn build_runs(
     spans: &[Span],
     trims: &[Range<usize>],
     marked: Option<Range<usize>>,
+    title_marker: usize,
     style: &RunStyle,
 ) -> Vec<TextRun> {
-    let mut cuts = vec![0, text_len];
+    let title_marker = title_marker.min(text_len);
+    let mut cuts = vec![0, text_len, title_marker];
     for span in spans {
         cuts.extend([span.range.start, span.range.end]);
     }
@@ -44,6 +49,10 @@ pub fn build_runs(
             let mut color = style.color;
             if ghost {
                 color.a *= style.ghost_alpha;
+            }
+            // The title's `# ` stays in the text but is not drawn.
+            if b <= title_marker {
+                color.a = 0.;
             }
             let underline = if in_marked {
                 Some(UnderlineStyle {
@@ -68,7 +77,11 @@ pub fn build_runs(
             });
             TextRun {
                 len: b - a,
-                font: style.font.clone(),
+                font: if title_marker > 0 {
+                    style.title_font.clone()
+                } else {
+                    style.font.clone()
+                },
                 color,
                 background_color: None,
                 underline,
@@ -80,14 +93,17 @@ pub fn build_runs(
 
 #[cfg(test)]
 mod tests {
-    use gpui::{font, hsla};
+    use gpui::{FontWeight, font, hsla};
     use tulis_core::AltMark;
 
     use super::*;
 
     fn style() -> RunStyle {
+        let mut title_font = font("Test");
+        title_font.weight = FontWeight::BOLD;
         RunStyle {
             font: font("Test"),
+            title_font,
             color: hsla(0., 0., 0., 1.),
             alt_underline: hsla(0.5, 0.5, 0.5, 1.),
             ai_underline: hsla(0.75, 0.5, 0.5, 1.),
@@ -115,7 +131,7 @@ mod tests {
                 alt: None,
             },
         ];
-        let runs = build_runs(10, &spans, &[7..9], None, &style());
+        let runs = build_runs(10, &spans, &[7..9], None, 0, &style());
         assert_eq!(
             runs.iter().map(|r| r.len).collect::<Vec<_>>(),
             vec![2, 4, 1, 2, 1]
@@ -131,13 +147,29 @@ mod tests {
     }
 
     #[test]
+    fn title_is_bold_and_its_marker_invisible() {
+        let spans = vec![Span {
+            range: 0..7,
+            ghost: false,
+            alt: None,
+        }];
+        let runs = build_runs(7, &spans, &[], None, 2, &style());
+        assert_eq!(runs.iter().map(|r| r.len).collect::<Vec<_>>(), vec![2, 5]);
+        assert_eq!(runs[0].color.a, 0.);
+        assert_eq!(runs[1].color.a, 1.);
+        assert!(runs.iter().all(|r| r.font.weight == FontWeight::BOLD));
+        let plain = build_runs(7, &spans, &[], None, 0, &style());
+        assert!(plain.iter().all(|r| r.font.weight != FontWeight::BOLD));
+    }
+
+    #[test]
     fn marked_text_is_underlined() {
         let spans = vec![Span {
             range: 0..5,
             ghost: false,
             alt: None,
         }];
-        let runs = build_runs(5, &spans, &[], Some(1..3), &style());
+        let runs = build_runs(5, &spans, &[], Some(1..3), 0, &style());
         assert_eq!(
             runs.iter().map(|r| r.len).collect::<Vec<_>>(),
             vec![1, 2, 2]
@@ -148,6 +180,6 @@ mod tests {
 
     #[test]
     fn empty_text_has_no_runs() {
-        assert!(build_runs(0, &[], &[], None, &style()).is_empty());
+        assert!(build_runs(0, &[], &[], None, 0, &style()).is_empty());
     }
 }

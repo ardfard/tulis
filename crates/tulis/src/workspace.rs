@@ -3,8 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    App, ClickEvent, Context, Entity, Focusable, MouseMoveEvent, PathPromptOptions, PromptLevel,
-    Subscription, Task, Window, div, prelude::*, px,
+    App, ClickEvent, Context, Entity, Focusable, Hsla, MouseMoveEvent, PathPromptOptions,
+    PromptLevel, Subscription, Task, Window, div, linear_color_stop, linear_gradient, prelude::*,
+    px,
 };
 use tulis_core::config::Config;
 use tulis_core::storage;
@@ -13,7 +14,7 @@ use tulis_core::{Document, OverflowId};
 use crate::actions::{
     CycleTheme, New, Open, OpenLab, Quit, Save, SaveAs, ToggleMarkers, ToggleOverflowPanel,
 };
-use crate::editor::{Editor, EditorEvent};
+use crate::editor::{Editor, EditorEvent, GUTTER};
 use crate::header_dim::HeaderDim;
 use crate::theme;
 
@@ -243,11 +244,73 @@ impl Workspace {
     }
 }
 
+/// The writing column's text width (the element adds `GUTTER` on each side).
+pub(crate) const COLUMN_WIDTH: f32 = 640.;
+/// Space above the first and below the last line, inside the scroll view.
+const COLUMN_PADDING_Y: f32 = 64.;
+/// Height of the fades over the scroll view's top and bottom edges.
+pub(crate) const FADE_HEIGHT: f32 = 48.;
+
+/// A fade from the background color (at the edge) to transparent, over `FADE_HEIGHT`.
+fn edge_fade(top: bool, background: Hsla) -> impl IntoElement {
+    let clear = Hsla {
+        a: 0.,
+        ..background
+    };
+    // Angle 180° runs top to bottom, 0° bottom to top; the first stop sits at the start.
+    let angle = if top { 180. } else { 0. };
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .h(px(FADE_HEIGHT))
+        .map(|d| if top { d.top_0() } else { d.bottom_0() })
+        .bg(linear_gradient(
+            angle,
+            linear_color_stop(background, 0.),
+            linear_color_stop(clear, 1.),
+        ))
+}
+
+impl Workspace {
+    /// The scrollable page: a centered column with fades over its top and bottom edges.
+    fn render_page(&self, cx: &App) -> impl IntoElement {
+        let editor = self.editor.read(cx);
+        let (scroll, background) = (editor.scroll.clone(), editor.theme.background);
+        div()
+            .relative()
+            .flex_1()
+            .h_full()
+            .child(
+                div()
+                    .id("editor-scroll")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll)
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .justify_center()
+                            .py(px(COLUMN_PADDING_Y))
+                            .px(px(32.))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .max_w(px(COLUMN_WIDTH) + GUTTER * 2.)
+                                    .child(self.editor.clone()),
+                            ),
+                    ),
+            )
+            .child(edge_fade(true, background))
+            .child(edge_fade(false, background))
+    }
+}
+
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_window_title(window, cx);
         let t = self.editor.read(cx).theme;
-        let scroll = self.editor.read(cx).scroll.clone();
         div()
             .size_full()
             .relative()
@@ -282,25 +345,7 @@ impl Render for Workspace {
                     .min_h(px(0.))
                     .flex()
                     .flex_row()
-                    .child(
-                        div()
-                            .id("editor-scroll")
-                            .flex_1()
-                            .h_full()
-                            .overflow_y_scroll()
-                            .track_scroll(&scroll)
-                            .child(
-                                div()
-                                    .w_full()
-                                    .flex()
-                                    .justify_center()
-                                    .py(px(56.))
-                                    .px(px(32.))
-                                    .child(
-                                        div().w_full().max_w(px(680.)).child(self.editor.clone()),
-                                    ),
-                            ),
-                    )
+                    .child(self.render_page(cx))
                     .when(self.show_overflow, |row| {
                         row.child(self.render_overflow(cx))
                     }),
@@ -707,6 +752,23 @@ mod tests {
         let paper = crate::theme::ThemeId::Paper.theme();
         assert_eq!(background(cx), paper.background);
         assert!(!cx.update(|_, cx| gpui_component::Theme::global(cx).mode.is_dark()));
+    }
+
+    #[gpui::test]
+    fn text_column_is_640px_wide_and_starts_after_the_gutter(cx: &mut TestAppContext) {
+        init(cx);
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(700.)));
+        cx.run_until_parked();
+        let (width, x) = ws.read_with(cx, |ws, cx| {
+            let layout = ws.editor.read(cx).layout.as_ref().expect("painted");
+            (layout.width, layout.origin.x)
+        });
+        assert_eq!(width, gpui::px(super::COLUMN_WIDTH));
+        // Centered: (1000 - 640) / 2 = 180.
+        assert_eq!(x, gpui::px(180.));
     }
 
     #[gpui::test]

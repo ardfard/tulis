@@ -25,6 +25,7 @@ use tulis_core::vim::{Mode, Vim};
 use tulis_core::{DocPos, Document, ParaId, Selection};
 
 use element::EditorElement;
+pub(crate) use element::GUTTER;
 use layout::LayoutCache;
 
 use crate::theme::{self, Theme};

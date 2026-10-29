@@ -1,14 +1,15 @@
 //! The custom element that shapes and paints the document.
 
 use gpui::{
-    App, AvailableSpace, Bounds, ElementId, ElementInputHandler, Entity, GlobalElementId,
-    InspectorElementId, LayoutId, PaintQuad, Pixels, Point, ScrollHandle, Style, TextAlign, Window,
-    fill, font, point, prelude::*, px, relative, size,
+    App, AvailableSpace, Bounds, ElementId, ElementInputHandler, Entity, FontWeight,
+    GlobalElementId, InspectorElementId, LayoutId, PaintQuad, Pixels, Point, ScrollHandle, Style,
+    TextAlign, Window, fill, font, point, prelude::*, px, relative, size,
 };
 
 use super::Editor;
 use super::layout::{LayoutCache, ParaLayout, clamp_px};
 use crate::runs::{RunStyle, build_runs};
+use tulis_core::stats::title_marker_len;
 
 pub struct EditorElement {
     editor: Entity<Editor>,
@@ -34,6 +35,9 @@ impl IntoElement for EditorElement {
     }
 }
 
+/// Horizontal space kept free on each side of the text, for the paragraph-version bar.
+pub(crate) const GUTTER: Pixels = px(24.);
+
 pub(crate) fn line_height(editor: &Editor) -> Pixels {
     px(editor.config.editor.effective_font_size() * 1.8)
 }
@@ -47,8 +51,11 @@ fn build_layout(
 ) -> LayoutCache {
     let font_size = px(editor.config.editor.effective_font_size());
     let lh = line_height(editor);
+    let mut title_font = font(editor.font_family.clone());
+    title_font.weight = FontWeight::BOLD;
     let style = RunStyle {
         font: font(editor.font_family.clone()),
+        title_font,
         color: editor.theme.text,
         alt_underline: editor.theme.text_muted,
         ai_underline: editor.theme.accent,
@@ -74,7 +81,15 @@ fn build_layout(
         let marked_here =
             marked.and_then(|(a, b)| (a.para == i && b.para == i).then(|| a.offset..b.offset));
         let text_len = text.len();
-        let runs = build_runs(text_len, &p.spans(), &trims, marked_here, &style);
+        let title_marker = if i == 0 { title_marker_len(&text) } else { 0 };
+        let runs = build_runs(
+            text_len,
+            &p.spans(),
+            &trims,
+            marked_here,
+            title_marker,
+            &style,
+        );
         let line = window
             .text_system()
             .shape_text(text.into(), font_size, &runs, Some(width), None)
@@ -191,9 +206,11 @@ impl Element for EditorElement {
             window.request_measured_layout(style, move |known, available, window, cx| {
                 let width = known.width.unwrap_or(match available.width {
                     AvailableSpace::Definite(width) => width,
-                    _ => px(680.),
+                    _ => px(640.) + GUTTER * 2.,
                 });
-                let layout = build_layout(editor.read(cx), width, point(px(0.), px(0.)), window);
+                let text_width = (width - GUTTER * 2.).max(px(1.));
+                let layout =
+                    build_layout(editor.read(cx), text_width, point(px(0.), px(0.)), window);
                 size(width, layout.total_height())
             });
         (layout_id, ())
@@ -209,7 +226,9 @@ impl Element for EditorElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let editor = self.editor.read(cx);
-        let layout = build_layout(editor, bounds.size.width, bounds.origin, window);
+        let text_origin = point(bounds.origin.x + GUTTER, bounds.origin.y);
+        let text_width = (bounds.size.width - GUTTER * 2.).max(px(1.));
+        let layout = build_layout(editor, text_width, text_origin, window);
         let lh = layout.line_height;
         let selection = selection_quads(editor, &layout);
         let block = editor.vim_captures_text();
@@ -267,8 +286,9 @@ impl Element for EditorElement {
             window.paint_quad(quad);
         }
         let lh = prepaint.layout.line_height;
+        let text_origin = prepaint.layout.origin;
         for para in &prepaint.layout.paras {
-            let origin = point(bounds.origin.x, bounds.origin.y + para.top);
+            let origin = point(text_origin.x, text_origin.y + para.top);
             para.line
                 .paint(origin, lh, TextAlign::Left, None, window, cx)
                 .ok();
