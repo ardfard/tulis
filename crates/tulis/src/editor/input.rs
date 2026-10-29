@@ -8,6 +8,13 @@ use tulis_core::Selection;
 use super::Editor;
 use crate::utf16;
 
+/// A UTF-16 range from the platform as an ordered byte range within `text` (conversion already
+/// clamps each end to the text's length).
+fn byte_range(text: &str, range_utf16: &Range<usize>) -> Range<usize> {
+    let range = utf16::range_from_utf16(text, range_utf16);
+    range.start.min(range.end)..range.start.max(range.end)
+}
+
 impl Editor {
     fn flat_range_of_selection(&self) -> Range<usize> {
         let r = self.selection.range();
@@ -31,7 +38,7 @@ impl EntityInputHandler for Editor {
         _cx: &mut Context<Self>,
     ) -> Option<String> {
         let flat = self.doc.flat_text();
-        let range = utf16::range_from_utf16(&flat, &range_utf16);
+        let range = byte_range(&flat, &range_utf16);
         actual_range.replace(utf16::range_to_utf16(&flat, &range));
         Some(flat[range].to_string())
     }
@@ -79,7 +86,7 @@ impl EntityInputHandler for Editor {
         }
         let flat = self.doc.flat_text();
         if let Some(range) = range_utf16
-            .map(|r| utf16::range_from_utf16(&flat, &r))
+            .map(|r| byte_range(&flat, &r))
             .or(self.marked.clone())
         {
             self.select_flat(range);
@@ -101,7 +108,7 @@ impl EntityInputHandler for Editor {
         }
         let flat = self.doc.flat_text();
         let range = range_utf16
-            .map(|r| utf16::range_from_utf16(&flat, &r))
+            .map(|r| byte_range(&flat, &r))
             .or(self.marked.clone())
             .unwrap_or_else(|| self.flat_range_of_selection());
         self.select_flat(range.clone());
@@ -109,7 +116,7 @@ impl EntityInputHandler for Editor {
         let start = range.start;
         self.marked = (!new_text.is_empty()).then(|| start..start + new_text.len());
         if let Some(sel) = new_selected_range_utf16 {
-            let sel = utf16::range_from_utf16(new_text, &sel);
+            let sel = byte_range(new_text, &sel);
             self.select_flat(start + sel.start..start + sel.end);
         }
         cx.notify();
@@ -123,7 +130,7 @@ impl EntityInputHandler for Editor {
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let flat = self.doc.flat_text();
-        let range = utf16::range_from_utf16(&flat, &range_utf16);
+        let range = byte_range(&flat, &range_utf16);
         let layout = self.layout.as_ref()?;
         let origin = layout.window_point(self.doc.pos_from_flat(range.start))?;
         Some(Bounds::new(origin, size(px(2.), layout.line_height)))

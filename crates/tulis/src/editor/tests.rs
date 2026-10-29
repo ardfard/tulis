@@ -591,3 +591,23 @@ fn splitting_inside_an_alternate_warns(cx: &mut TestAppContext) {
         Some(DISCARD_NOTICE)
     );
 }
+
+#[gpui::test]
+#[allow(clippy::reversed_empty_ranges)] // reversed ranges are the point of this test
+fn input_handler_accepts_reversed_and_out_of_range_ranges(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["hello"]);
+    editor.update_in(cx, |e, window, cx| {
+        let mut actual = None;
+        assert_eq!(
+            e.text_for_range(3..1, &mut actual, window, cx).as_deref(),
+            Some("el")
+        );
+        assert_eq!(actual, Some(1..3));
+        assert_eq!(
+            e.text_for_range(9..2, &mut actual, window, cx).as_deref(),
+            Some("llo")
+        );
+        e.replace_text_in_range(Some(4..1), "X", window, cx);
+    });
+    assert_eq!(texts(&editor, cx), vec!["hXo"]);
+}
