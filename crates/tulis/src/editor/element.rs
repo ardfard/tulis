@@ -9,7 +9,6 @@ use gpui::{
 use super::Editor;
 use super::layout::{LayoutCache, ParaLayout, clamp_px};
 use crate::runs::{RunStyle, build_runs};
-use crate::theme;
 
 pub struct EditorElement {
     editor: Entity<Editor>,
@@ -36,7 +35,7 @@ impl IntoElement for EditorElement {
 }
 
 pub(crate) fn line_height(editor: &Editor) -> Pixels {
-    px(editor.config.editor.effective_font_size() * 1.6)
+    px(editor.config.editor.effective_font_size() * 1.8)
 }
 
 /// Shape every paragraph at `width`. GPUI caches shaped lines between frames, so this is cheap.
@@ -49,12 +48,12 @@ fn build_layout(
     let font_size = px(editor.config.editor.effective_font_size());
     let lh = line_height(editor);
     let style = RunStyle {
-        font: font(editor.config.editor.font_family.clone()),
-        color: theme::ink(),
-        alt_underline: theme::alt_underline(),
-        ai_underline: theme::ai_underline(),
-        trim: theme::trim(),
-        ghost_alpha: theme::GHOST_ALPHA,
+        font: font(editor.font_family.clone()),
+        color: editor.theme.text,
+        alt_underline: editor.theme.text_muted,
+        ai_underline: editor.theme.accent,
+        trim: editor.theme.trim,
+        ghost_alpha: editor.theme.ghost_alpha,
     };
     let marked = editor.marked.clone().map(|r| {
         (
@@ -138,7 +137,7 @@ fn selection_quads(editor: &Editor, layout: &LayoutCache) -> Vec<PaintQuad> {
                     point(layout.origin.x + x0, top),
                     point(layout.origin.x + x1, top + lh),
                 ),
-                theme::selection(),
+                editor.theme.selection,
             ));
         }
     }
@@ -220,7 +219,7 @@ impl Element for EditorElement {
             } else {
                 px(2.)
             };
-            let mut color = theme::cursor();
+            let mut color = editor.theme.cursor;
             if block {
                 color.a = 0.45;
             }

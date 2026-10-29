@@ -12,7 +12,7 @@ use tulis_core::storage;
 use tulis_core::vim::Mode;
 use tulis_core::{Document, OverflowId};
 
-use crate::actions::{New, Open, Quit, Save, SaveAs, ToggleOverflowPanel};
+use crate::actions::{CycleTheme, New, Open, Quit, Save, SaveAs, ToggleOverflowPanel};
 use crate::editor::Editor;
 use crate::theme;
 
@@ -40,6 +40,8 @@ impl Workspace {
     ) -> Self {
         let editor = cx.new(|cx| Editor::new(config, Document::new(), cx));
         cx.observe(&editor, |_, _, cx| cx.notify()).detach();
+        let initial_theme = editor.read(cx).theme;
+        theme::apply_to_components(&initial_theme, cx);
         let mut workspace = Self {
             editor,
             path: None,
@@ -96,6 +98,7 @@ impl Workspace {
 
     fn render_status(&self, cx: &App) -> impl IntoElement {
         let editor = self.editor.read(cx);
+        let t = editor.theme;
         let name = self
             .path
             .as_deref()
@@ -134,9 +137,9 @@ impl Workspace {
             .px_4()
             .py_1()
             .border_t_1()
-            .border_color(theme::rule())
+            .border_color(t.rule)
             .text_xs()
-            .text_color(theme::muted())
+            .text_color(t.text_muted)
             .child(parts.join("  ·  "))
             .child(editor.notice.clone().unwrap_or_default())
     }
@@ -152,6 +155,10 @@ fn preview(text: &str) -> String {
 }
 
 impl Workspace {
+    fn cycle_theme(&mut self, _: &CycleTheme, _: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, cx| e.cycle_theme(cx));
+    }
+
     fn toggle_overflow(&mut self, _: &ToggleOverflowPanel, _: &mut Window, cx: &mut Context<Self>) {
         self.show_overflow = !self.show_overflow;
         cx.notify();
@@ -165,6 +172,7 @@ impl Workspace {
     }
 
     fn render_overflow(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = self.editor.read(cx).theme;
         let items = self.editor.read(cx).doc.overflow.clone();
         let keep = self.keep_in_overflow;
         div()
@@ -173,8 +181,8 @@ impl Workspace {
             .flex()
             .flex_col()
             .border_l_1()
-            .border_color(theme::rule())
-            .bg(theme::panel())
+            .border_color(t.rule)
+            .bg(t.panel)
             .child(
                 div()
                     .px_3()
@@ -188,7 +196,7 @@ impl Workspace {
                             .id("keep-toggle")
                             .cursor_pointer()
                             .text_xs()
-                            .text_color(theme::muted())
+                            .text_color(t.text_muted)
                             .child(if keep {
                                 "☑ keep after insert"
                             } else {
@@ -213,7 +221,7 @@ impl Workspace {
                         list.child(
                             div()
                                 .text_xs()
-                                .text_color(theme::muted())
+                                .text_color(t.text_muted)
                                 .child("Ctrl+Shift+O moves the selection or paragraph here."),
                         )
                     })
@@ -223,7 +231,7 @@ impl Workspace {
                             .id(("overflow", id.0))
                             .p_2()
                             .rounded_md()
-                            .bg(theme::paper())
+                            .bg(t.background)
                             .cursor_pointer()
                             .text_sm()
                             .flex()
@@ -236,7 +244,7 @@ impl Workspace {
                             .child(
                                 div()
                                     .id(("overflow-remove", id.0))
-                                    .text_color(theme::muted())
+                                    .text_color(t.text_muted)
                                     .child("×")
                                     .on_click(cx.listener(move |ws, _: &ClickEvent, _, cx| {
                                         cx.stop_propagation();
@@ -250,14 +258,16 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = self.editor.read(cx).theme;
         let scroll = self.editor.read(cx).scroll.clone();
         div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme::paper())
-            .text_color(theme::ink())
+            .bg(t.background)
+            .text_color(t.text)
             .on_action(cx.listener(Self::toggle_overflow))
+            .on_action(cx.listener(Self::cycle_theme))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_as))
             .on_action(cx.listener(Self::open))
@@ -266,7 +276,7 @@ impl Render for Workspace {
             .children(
                 self.banner
                     .clone()
-                    .map(|b| div().px_4().py_2().bg(theme::banner()).text_sm().child(b)),
+                    .map(|b| div().px_4().py_2().bg(t.banner).text_sm().child(b)),
             )
             .child(
                 div()
@@ -593,5 +603,24 @@ mod tests {
             Workspace::new(Config::default(), None, None, window, cx)
         });
         ws.update_in(cx, |ws, _, cx| assert!(!ws.save_now(cx)));
+    }
+
+    #[gpui::test]
+    fn cycling_the_theme_recolors_components(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        let background = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|_, cx| gpui_component::Theme::global(cx).background)
+        };
+        let midnight = crate::theme::ThemeId::Midnight.theme();
+        assert_eq!(background(cx), midnight.background);
+        ws.update_in(cx, |ws, window, cx| {
+            ws.cycle_theme(&crate::actions::CycleTheme, window, cx)
+        });
+        let paper = crate::theme::ThemeId::Paper.theme();
+        assert_eq!(background(cx), paper.background);
+        assert!(!cx.update(|_, cx| gpui_component::Theme::global(cx).mode.is_dark()));
     }
 }

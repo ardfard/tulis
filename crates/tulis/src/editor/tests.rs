@@ -611,3 +611,38 @@ fn input_handler_accepts_reversed_and_out_of_range_ranges(cx: &mut TestAppContex
     });
     assert_eq!(texts(&editor, cx), vec!["hXo"]);
 }
+
+#[gpui::test]
+fn cycle_theme_advances_and_announces(cx: &mut TestAppContext) {
+    use crate::theme::ThemeId;
+    let (editor, cx) = editor_with(cx, &["x"]);
+    assert_eq!(editor.read_with(cx, |e, _| e.theme.id), ThemeId::Midnight);
+    editor.update(cx, |e, cx| e.cycle_theme(cx));
+    assert_eq!(editor.read_with(cx, |e, _| e.theme.id), ThemeId::Paper);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.notice.clone()).as_deref(),
+        Some("Theme: Paper")
+    );
+}
+
+#[gpui::test]
+fn vim_gt_cycles_theme(cx: &mut TestAppContext) {
+    use crate::theme::ThemeId;
+    let (editor, cx) = vim_editor(cx, &["x"]);
+    type_str(&editor, cx, "gtgt");
+    assert_eq!(editor.read_with(cx, |e, _| e.theme.id), ThemeId::Sepia);
+}
+
+#[gpui::test]
+fn unknown_theme_in_config_falls_back_with_a_notice(cx: &mut TestAppContext) {
+    use crate::theme::ThemeId;
+    let mut config = Config::default();
+    config.editor.theme = "neon".into();
+    let (editor, cx) =
+        cx.add_window_view(|_, cx| Editor::new(config, Document::from_texts(&["x"]), cx));
+    assert_eq!(editor.read_with(cx, |e, _| e.theme.id), ThemeId::Midnight);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.notice.clone()).as_deref(),
+        Some("Unknown theme \"neon\"; using Midnight")
+    );
+}

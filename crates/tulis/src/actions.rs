@@ -46,6 +46,7 @@ gpui::actions!(
         AcceptTrim,
         Cancel,
         ToggleVim,
+        CycleTheme,
         Save,
         SaveAs,
         Open,

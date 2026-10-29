@@ -219,8 +219,8 @@ impl Editor {
             }
             VimCommand::ToggleGhost => self.toggle_ghost_here(cx),
             // Wired up in Tasks 4 and 6.
-            VimCommand::CycleTheme
-            | VimCommand::ToggleMarkers
+            VimCommand::CycleTheme => self.cycle_theme(cx),
+            VimCommand::ToggleMarkers
             | VimCommand::TogglePreview
             | VimCommand::CheatSheet
             | VimCommand::Lab

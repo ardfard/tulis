@@ -69,6 +69,7 @@ pub fn bind(cx: &mut App) {
         binding("tab", AcceptTrim, ed, cx),
         binding("escape", Cancel, ed, cx),
         binding("secondary-alt-v", ToggleVim, ed, cx),
+        binding("secondary-k t", CycleTheme, None, cx),
         binding("secondary-s", Save, None, cx),
         binding("secondary-shift-s", SaveAs, None, cx),
         binding("secondary-o", Open, None, cx),
@@ -86,7 +87,7 @@ mod tests {
     fn all_bindings_load(cx: &mut TestAppContext) {
         cx.update(|cx| {
             super::bind(cx);
-            assert_eq!(cx.key_bindings().borrow().bindings().len(), 56);
+            assert_eq!(cx.key_bindings().borrow().bindings().len(), 57);
         });
     }
 }

@@ -15,8 +15,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    App, Context, CursorStyle, FocusHandle, Focusable, MouseButton, Pixels, ScrollHandle, Task,
-    Window, div, prelude::*,
+    App, Context, CursorStyle, FocusHandle, Focusable, MouseButton, Pixels, ScrollHandle,
+    SharedString, Task, Window, div, prelude::*,
 };
 use tulis_core::ai::LlmProvider;
 use tulis_core::config::Config;
@@ -26,6 +26,8 @@ use tulis_core::{DocPos, Document, ParaId, Selection};
 
 use element::EditorElement;
 use layout::LayoutCache;
+
+use crate::theme::{self, Theme};
 
 pub type Snapshot = (Document, Selection);
 
@@ -53,6 +55,9 @@ pub struct Editor {
     pub alt_edit: Option<AltEdit>,
     pub ai_task: Option<Task<()>>,
     pub scroll: ScrollHandle,
+    pub theme: Theme,
+    /// The installed font family the page is set in (see `theme::resolve_font`).
+    pub(crate) font_family: SharedString,
     /// Used instead of the configured provider when set (tests).
     pub provider_override: Option<Arc<dyn LlmProvider>>,
     pub(crate) layout: Option<LayoutCache>,
@@ -74,17 +79,25 @@ pub(crate) const DISCARD_NOTICE: &str = "Other versions/alternates discarded —
 impl Editor {
     pub fn new(config: Config, doc: Document, cx: &mut Context<Self>) -> Self {
         let vim = config.editor.vim_mode.then(Vim::new);
+        let (theme_id, theme_notice) = theme::theme_from_config(&config.editor.theme);
+        let font_family = theme::resolve_font(
+            &config.editor.font_family,
+            &cx.text_system().all_font_names(),
+            &theme::platform_mono(cx),
+        );
         Self {
             doc,
             selection: Selection::default(),
             config,
             dirty: false,
-            notice: None,
+            notice: theme_notice,
             trims: Vec::new(),
             vim,
             alt_edit: None,
             ai_task: None,
             scroll: ScrollHandle::new(),
+            theme: theme_id.theme(),
+            font_family: font_family.into(),
             provider_override: None,
             layout: None,
             marked: None,
@@ -116,6 +129,13 @@ impl Editor {
     pub fn set_notice(&mut self, notice: impl Into<String>, cx: &mut Context<Self>) {
         self.notice = Some(notice.into());
         cx.notify();
+    }
+
+    /// Switch to the next preset for this session and announce it.
+    pub fn cycle_theme(&mut self, cx: &mut Context<Self>) {
+        self.theme = self.theme.id.next().theme();
+        theme::apply_to_components(&self.theme, cx);
+        self.set_notice(format!("Theme: {}", self.theme.id.name()), cx);
     }
 
     pub fn cursor(&self) -> DocPos {
