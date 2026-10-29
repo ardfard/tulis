@@ -152,6 +152,10 @@ impl Editor {
                 let target = self.motion_target(head, motion, count);
                 let range = if target < head {
                     target..head
+                } else if matches!(motion, Motion::WordForward | Motion::WordEnd)
+                    && target.para != head.para
+                {
+                    head..DocPos::new(head.para, self.doc.paragraphs[head.para].len())
                 } else if motion == Motion::WordEnd {
                     head..self.next_in_para(target)
                 } else {

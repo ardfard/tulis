@@ -470,3 +470,20 @@ fn toggle_vim_switches_mode(cx: &mut TestAppContext) {
     editor.update_in(cx, |e, window, cx| e.toggle_vim(&ToggleVim, window, cx));
     assert_eq!(editor.read_with(cx, |e, _| e.vim_mode()), None);
 }
+
+#[gpui::test]
+fn vim_dw_on_last_word_stays_within_the_paragraph(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["one two", "three"]);
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 4)));
+    type_str(&editor, cx, "dw");
+    assert_eq!(texts(&editor, cx), vec!["one ", "three"]);
+    assert_eq!(editor.read_with(cx, |e, _| e.register.clone()), "two");
+}
+
+#[gpui::test]
+fn vim_cw_on_last_word_stays_within_the_paragraph(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["one two", "three"]);
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 4)));
+    type_str(&editor, cx, "cwx");
+    assert_eq!(texts(&editor, cx), vec!["one x", "three"]);
+}
