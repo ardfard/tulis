@@ -161,7 +161,13 @@ fn read_sidecar(path: &Path, notices: &mut Vec<String>) -> Option<SidecarIn> {
         }
     }
     match serde_json::from_slice::<SidecarIn>(&bytes) {
-        Ok(sidecar) => Some(sidecar),
+        Ok(sidecar) => match sidecar.document.validate() {
+            Ok(()) => Some(sidecar),
+            Err(reason) => {
+                notices.push(format!("Ignoring unreadable sidecar: {reason}"));
+                None
+            }
+        },
         Err(e) => {
             notices.push(format!("Ignoring unreadable sidecar: {e}"));
             None
@@ -308,6 +314,28 @@ mod tests {
         let opened = open(&path).unwrap();
         assert_eq!(opened.document.paragraphs[0].text(), "Text.");
         assert!(opened.notices[0].starts_with("Ignoring unreadable sidecar"));
+    }
+
+    #[test]
+    fn invalid_sidecar_document_is_ignored_with_notice() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.md");
+        save(&Document::from_texts(&["Text."]), &path).unwrap();
+        let side = sidecar_path(&path);
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(&side).unwrap()).unwrap();
+        json["document"]["paragraphs"][0]["active"] = 7.into();
+        fs::write(&side, serde_json::to_vec(&json).unwrap()).unwrap();
+        let opened = open(&path).unwrap();
+        assert_eq!(opened.document.paragraphs[0].text(), "Text.");
+        assert_eq!(opened.document.validate(), Ok(()));
+        assert_eq!(
+            opened.notices,
+            vec![
+                "Ignoring unreadable sidecar: paragraph 0 has an out-of-range active version"
+                    .to_string()
+            ]
+        );
     }
 
     #[test]

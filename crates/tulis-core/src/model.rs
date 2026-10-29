@@ -321,6 +321,57 @@ impl Document {
             .map(|p| p.export_text().split_whitespace().count())
             .sum()
     }
+
+    /// Check the invariants the editor relies on (for documents read from disk).
+    pub fn validate(&self) -> Result<(), String> {
+        if self.paragraphs.is_empty() {
+            return Err("document has no paragraphs".into());
+        }
+        let line_break = |text: &str| text.contains(['\n', '\r']);
+        for (i, p) in self.paragraphs.iter().enumerate() {
+            if p.versions.is_empty() {
+                return Err(format!("paragraph {i} has no versions"));
+            }
+            if p.active >= p.versions.len() {
+                return Err(format!("paragraph {i} has an out-of-range active version"));
+            }
+            if p.id.0 >= self.next_id {
+                return Err(format!("paragraph {i} has an id not below next_id"));
+            }
+            for v in &p.versions {
+                if v.segments.is_empty() {
+                    return Err(format!("paragraph {i} has a version with no segments"));
+                }
+                for seg in &v.segments {
+                    match &seg.kind {
+                        SegKind::Plain(text) if line_break(text) => {
+                            return Err(format!("paragraph {i} contains a line break"));
+                        }
+                        SegKind::Plain(_) => {}
+                        SegKind::Alt { options, active } => {
+                            if options.is_empty() {
+                                return Err(format!(
+                                    "paragraph {i} has an alternate with no options"
+                                ));
+                            }
+                            if *active >= options.len() {
+                                return Err(format!(
+                                    "paragraph {i} has an alternate with an out-of-range active option"
+                                ));
+                            }
+                            if options.iter().any(|o| line_break(&o.text)) {
+                                return Err(format!("paragraph {i} contains a line break"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if self.overflow.iter().any(|o| o.id.0 >= self.next_id) {
+            return Err("an overflow item has an id not below next_id".into());
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -351,6 +402,59 @@ pub(crate) mod test_util {
 mod tests {
     use super::test_util::*;
     use super::*;
+
+    #[test]
+    fn validate_accepts_well_formed_documents() {
+        let mut d = Document::from_texts(&["a", "b"]);
+        d.paragraphs[0].versions[0].segments = vec![alt_seg(&["x", "y"], 1)];
+        assert_eq!(d.validate(), Ok(()));
+    }
+
+    #[test]
+    fn validate_rejects_malformed_documents() {
+        let base = Document::from_texts(&["a", "b"]);
+        let check = |f: &dyn Fn(&mut Document), want: &str| {
+            let mut d = base.clone();
+            f(&mut d);
+            let err = d.validate().expect_err(want);
+            assert!(err.contains(want), "{err:?} should mention {want:?}");
+        };
+        check(&|d| d.paragraphs.clear(), "no paragraphs");
+        check(&|d| d.paragraphs[0].versions.clear(), "no versions");
+        check(&|d| d.paragraphs[0].active = 1, "active version");
+        check(
+            &|d| d.paragraphs[0].versions[0].segments.clear(),
+            "no segments",
+        );
+        check(
+            &|d| d.paragraphs[1].versions[0].segments = vec![alt_seg(&[], 0)],
+            "no options",
+        );
+        check(
+            &|d| d.paragraphs[1].versions[0].segments = vec![alt_seg(&["x"], 1)],
+            "active option",
+        );
+        check(
+            &|d| d.paragraphs[1].versions[0].segments = vec![alt_seg(&["x", "y\rz"], 0)],
+            "line break",
+        );
+        check(
+            &|d| d.paragraphs[0].versions[0].segments = vec![Segment::plain("a\nb", false)],
+            "line break",
+        );
+        check(&|d| d.next_id = d.paragraphs[1].id.0, "next_id");
+        check(
+            &|d| {
+                d.overflow.push(OverflowItem {
+                    id: OverflowId(d.next_id),
+                    text: "x".into(),
+                    created_at: Utc::now(),
+                    from_paragraph: None,
+                })
+            },
+            "next_id",
+        );
+    }
 
     #[test]
     fn normalize_merges_and_drops_empty_plain() {
