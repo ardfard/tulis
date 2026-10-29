@@ -1,10 +1,12 @@
 mod actions;
 mod cheat_sheet;
+mod chrome;
 mod commands;
 mod editor;
 mod keymap;
 mod runs;
 mod theme;
+mod toast;
 mod utf16;
 mod workspace;
 

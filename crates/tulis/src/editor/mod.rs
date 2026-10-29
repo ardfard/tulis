@@ -28,6 +28,7 @@ use element::EditorElement;
 use layout::LayoutCache;
 
 use crate::theme::{self, Theme};
+use crate::toast::{TOAST_LIFETIME, ToastQueue};
 
 pub type Snapshot = (Document, Selection);
 
@@ -49,7 +50,7 @@ pub struct Editor {
     pub selection: Selection,
     pub config: Config,
     pub dirty: bool,
-    pub notice: Option<String>,
+    pub toasts: ToastQueue,
     pub trims: Vec<TrimSuggestion>,
     pub vim: Option<Vim>,
     pub alt_edit: Option<AltEdit>,
@@ -87,12 +88,12 @@ impl Editor {
             &cx.text_system().all_font_names(),
             &theme::platform_mono(cx),
         );
-        Self {
+        let mut editor = Self {
             doc,
             selection: Selection::default(),
             config,
             dirty: false,
-            notice: theme_notice,
+            toasts: ToastQueue::default(),
             trims: Vec::new(),
             vim,
             alt_edit: None,
@@ -111,7 +112,11 @@ impl Editor {
             register_linewise: false,
             history: History::new(HISTORY_LIMIT),
             focus_handle: cx.focus_handle(),
+        };
+        if let Some(notice) = theme_notice {
+            editor.set_notice(notice, cx);
         }
+        editor
     }
 
     /// Replace the document (open/new). Clears history and transient state.
@@ -129,9 +134,25 @@ impl Editor {
         cx.notify();
     }
 
+    /// Show a toast; it is removed after `TOAST_LIFETIME`.
     pub fn set_notice(&mut self, notice: impl Into<String>, cx: &mut Context<Self>) {
-        self.notice = Some(notice.into());
+        let id = self.toasts.push(notice);
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(TOAST_LIFETIME).await;
+            this.update(cx, |e, cx| {
+                e.toasts.remove(id);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
         cx.notify();
+    }
+
+    /// The newest toast still showing (tests).
+    #[cfg(test)]
+    pub fn last_notice(&self) -> Option<&str> {
+        self.toasts.iter().last().map(|t| t.text.as_str())
     }
 
     /// Switch to the next preset for this session and announce it.
@@ -239,7 +260,6 @@ impl Editor {
         self.dirty = true;
         self.autoscroll = true;
         self.goal_x = None;
-        self.notice = None;
         cx.notify();
     }
 
@@ -363,7 +383,7 @@ impl Editor {
         }
         self.end_edit(cx);
         if discards {
-            self.notice = Some(DISCARD_NOTICE.into());
+            self.set_notice(DISCARD_NOTICE, cx);
         }
     }
 

@@ -145,7 +145,6 @@ impl Workspace {
             .text_xs()
             .text_color(t.text_muted)
             .child(parts.join("  ·  "))
-            .child(editor.notice.clone().unwrap_or_default())
     }
 }
 
@@ -284,6 +283,7 @@ impl Render for Workspace {
         let scroll = self.editor.read(cx).scroll.clone();
         div()
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .bg(t.background)
@@ -333,6 +333,7 @@ impl Render for Workspace {
                     }),
             )
             .child(self.render_status(cx))
+            .child(self.render_toasts(cx))
     }
 }
 
@@ -685,6 +686,29 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(ws.read_with(cx, |ws, _| ws.show_overflow));
+    }
+
+    #[gpui::test]
+    fn toasts_stack_two_and_expire(cx: &mut TestAppContext) {
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.update(cx, |e, cx| {
+            e.set_notice("one", cx);
+            e.set_notice("two", cx);
+            e.set_notice("three", cx);
+        });
+        let shown = |cx: &mut gpui::VisualTestContext| {
+            editor.read_with(cx, |e, _| {
+                e.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(shown(cx), vec!["two", "three"]);
+        cx.run_until_parked();
+        cx.executor().advance_clock(crate::toast::TOAST_LIFETIME);
+        cx.run_until_parked();
+        assert!(shown(cx).is_empty());
     }
 
     #[gpui::test]

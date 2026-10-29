@@ -340,7 +340,7 @@ fn stale_ai_result_is_dropped(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(texts(&editor, cx), vec!["XI love tea"]);
     assert_eq!(
-        editor.read_with(cx, |e, _| e.notice.clone()),
+        editor.read_with(cx, |e, _| e.last_notice().map(str::to_string)),
         Some(super::ai::STALE_NOTICE.to_string())
     );
 }
@@ -371,7 +371,7 @@ fn missing_api_key_is_reported(cx: &mut TestAppContext) {
         e.ai_alternates(&AiAlternates, window, cx)
     });
     assert_eq!(
-        editor.read_with(cx, |e, _| e.notice.clone()),
+        editor.read_with(cx, |e, _| e.last_notice().map(str::to_string)),
         Some("Set $TULIS_TEST_NO_SUCH_KEY to use AI".to_string())
     );
 }
@@ -561,13 +561,18 @@ fn splitting_a_multi_version_paragraph_warns_and_undo_restores(cx: &mut TestAppC
     });
     select(&editor, cx, DocPos::new(0, 10), DocPos::new(0, 10));
     editor.update_in(cx, |e, window, cx| e.newline(&Newline, window, cx));
-    assert_eq!(editor.read_with(cx, |e, _| e.notice.clone()), None);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.last_notice().map(str::to_string)),
+        None
+    );
     editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
     select(&editor, cx, DocPos::new(0, 5), DocPos::new(0, 5));
     editor.update_in(cx, |e, window, cx| e.newline(&Newline, window, cx));
     assert_eq!(texts(&editor, cx), vec!["Draft", " one."]);
     assert_eq!(
-        editor.read_with(cx, |e, _| e.notice.clone()).as_deref(),
+        editor
+            .read_with(cx, |e, _| e.last_notice().map(str::to_string))
+            .as_deref(),
         Some(DISCARD_NOTICE)
     );
     editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
@@ -587,7 +592,9 @@ fn splitting_inside_an_alternate_warns(cx: &mut TestAppContext) {
     editor.update_in(cx, |e, window, cx| e.newline(&Newline, window, cx));
     assert_eq!(texts(&editor, cx), vec!["I lo", "ve tea"]);
     assert_eq!(
-        editor.read_with(cx, |e, _| e.notice.clone()).as_deref(),
+        editor
+            .read_with(cx, |e, _| e.last_notice().map(str::to_string))
+            .as_deref(),
         Some(DISCARD_NOTICE)
     );
 }
@@ -620,7 +627,9 @@ fn cycle_theme_advances_and_announces(cx: &mut TestAppContext) {
     editor.update(cx, |e, cx| e.cycle_theme(cx));
     assert_eq!(editor.read_with(cx, |e, _| e.theme.id), ThemeId::Paper);
     assert_eq!(
-        editor.read_with(cx, |e, _| e.notice.clone()).as_deref(),
+        editor
+            .read_with(cx, |e, _| e.last_notice().map(str::to_string))
+            .as_deref(),
         Some("Theme: Paper")
     );
 }
@@ -642,7 +651,9 @@ fn unknown_theme_in_config_falls_back_with_a_notice(cx: &mut TestAppContext) {
         cx.add_window_view(|_, cx| Editor::new(config, Document::from_texts(&["x"]), cx));
     assert_eq!(editor.read_with(cx, |e, _| e.theme.id), ThemeId::Midnight);
     assert_eq!(
-        editor.read_with(cx, |e, _| e.notice.clone()).as_deref(),
+        editor
+            .read_with(cx, |e, _| e.last_notice().map(str::to_string))
+            .as_deref(),
         Some("Unknown theme \"neon\"; using Midnight")
     );
 }
@@ -654,7 +665,9 @@ fn vim_gm_toggles_markers(cx: &mut TestAppContext) {
     type_str(&editor, cx, "gm");
     assert!(!editor.read_with(cx, |e, _| e.show_markers));
     assert_eq!(
-        editor.read_with(cx, |e, _| e.notice.clone()).as_deref(),
+        editor
+            .read_with(cx, |e, _| e.last_notice().map(str::to_string))
+            .as_deref(),
         Some("Markers hidden")
     );
 }
