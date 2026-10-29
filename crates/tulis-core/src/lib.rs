@@ -10,6 +10,8 @@ pub mod model;
 pub mod motion;
 pub mod overflow;
 pub mod pos;
+pub mod share;
+pub mod stats;
 pub mod storage;
 pub mod vim;
 
