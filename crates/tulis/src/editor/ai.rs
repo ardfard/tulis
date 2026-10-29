@@ -137,7 +137,7 @@ impl Editor {
         self.start_trim(vec![para], cx);
     }
 
-    pub(super) fn ai_trim_document(
+    pub(crate) fn ai_trim_document(
         &mut self,
         _: &AiTrimDocument,
         _: &mut Window,

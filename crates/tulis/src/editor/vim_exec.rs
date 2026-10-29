@@ -9,7 +9,7 @@ use tulis_core::vim::{InsertAt, Mode, Motion, Operator, Vim, VimCommand, VimKey}
 use tulis_core::{DocPos, Selection};
 
 use super::Editor;
-use crate::actions::ToggleVim;
+use crate::actions::{ShowCheatSheet, ToggleOverflowPanel, TogglePreview, ToggleVim};
 
 impl Editor {
     pub(crate) fn vim_key(&mut self, key: VimKey, window: &mut Window, cx: &mut Context<Self>) {
@@ -218,15 +218,14 @@ impl Editor {
                 }
             }
             VimCommand::ToggleGhost => self.toggle_ghost_here(cx),
-            // Wired up in Tasks 4 and 6.
             VimCommand::CycleTheme => self.cycle_theme(cx),
-            VimCommand::ToggleMarkers
-            | VimCommand::TogglePreview
-            | VimCommand::CheatSheet
-            | VimCommand::Lab
-            | VimCommand::ToggleOverflow => {}
+            VimCommand::ToggleMarkers => self.toggle_markers(cx),
+            VimCommand::Lab => self.open_lab(window, cx),
+            // Window-level commands: the workspace handles these actions.
+            VimCommand::TogglePreview => window.dispatch_action(Box::new(TogglePreview), cx),
+            VimCommand::CheatSheet => window.dispatch_action(Box::new(ShowCheatSheet), cx),
+            VimCommand::ToggleOverflow => window.dispatch_action(Box::new(ToggleOverflowPanel), cx),
         }
-        let _ = window;
     }
 
     fn vim_put(&mut self, before: bool, count: usize, cx: &mut Context<Self>) {

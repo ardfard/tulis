@@ -646,3 +646,24 @@ fn unknown_theme_in_config_falls_back_with_a_notice(cx: &mut TestAppContext) {
         Some("Unknown theme \"neon\"; using Midnight")
     );
 }
+
+#[gpui::test]
+fn vim_gm_toggles_markers(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["x"]);
+    assert!(editor.read_with(cx, |e, _| e.show_markers));
+    type_str(&editor, cx, "gm");
+    assert!(!editor.read_with(cx, |e, _| e.show_markers));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.notice.clone()).as_deref(),
+        Some("Markers hidden")
+    );
+}
+
+#[gpui::test]
+fn vim_gl_runs_the_document_trim_until_the_lab_exists(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["I really love tea."]);
+    with_mock(&editor, cx, vec![r#"["really "]"#]);
+    type_str(&editor, cx, "gl");
+    cx.run_until_parked();
+    assert_eq!(editor.read_with(cx, |e, _| e.trims.len()), 1);
+}

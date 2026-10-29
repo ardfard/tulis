@@ -56,6 +56,8 @@ pub struct Editor {
     pub ai_task: Option<Task<()>>,
     pub scroll: ScrollHandle,
     pub theme: Theme,
+    /// Alternate and version markers are drawn (Ctrl+. / vim `gm`).
+    pub show_markers: bool,
     /// The installed font family the page is set in (see `theme::resolve_font`).
     pub(crate) font_family: SharedString,
     /// Used instead of the configured provider when set (tests).
@@ -97,6 +99,7 @@ impl Editor {
             ai_task: None,
             scroll: ScrollHandle::new(),
             theme: theme_id.theme(),
+            show_markers: true,
             font_family: font_family.into(),
             provider_override: None,
             layout: None,
@@ -136,6 +139,21 @@ impl Editor {
         self.theme = self.theme.id.next().theme();
         theme::apply_to_components(&self.theme, cx);
         self.set_notice(format!("Theme: {}", self.theme.id.name()), cx);
+    }
+
+    pub fn toggle_markers(&mut self, cx: &mut Context<Self>) {
+        self.show_markers = !self.show_markers;
+        let state = if self.show_markers {
+            "Markers shown"
+        } else {
+            "Markers hidden"
+        };
+        self.set_notice(state, cx);
+    }
+
+    /// The Lab arrives with the Lab plan; until then this runs the v1 document trim.
+    pub fn open_lab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ai_trim_document(&crate::actions::AiTrimDocument, window, cx);
     }
 
     pub fn cursor(&self) -> DocPos {

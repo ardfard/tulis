@@ -12,7 +12,9 @@ use tulis_core::storage;
 use tulis_core::vim::Mode;
 use tulis_core::{Document, OverflowId};
 
-use crate::actions::{CycleTheme, New, Open, Quit, Save, SaveAs, ToggleOverflowPanel};
+use crate::actions::{
+    CycleTheme, New, Open, OpenLab, Quit, Save, SaveAs, ToggleMarkers, ToggleOverflowPanel,
+};
 use crate::editor::Editor;
 use crate::theme;
 
@@ -157,11 +159,29 @@ fn preview(text: &str) -> String {
 }
 
 impl Workspace {
+    pub(crate) fn toggle_markers(
+        &mut self,
+        _: &ToggleMarkers,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.editor.update(cx, |e, cx| e.toggle_markers(cx));
+    }
+
+    pub(crate) fn open_lab(&mut self, _: &OpenLab, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, cx| e.open_lab(window, cx));
+    }
+
     fn cycle_theme(&mut self, _: &CycleTheme, _: &mut Window, cx: &mut Context<Self>) {
         self.editor.update(cx, |e, cx| e.cycle_theme(cx));
     }
 
-    fn toggle_overflow(&mut self, _: &ToggleOverflowPanel, _: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_overflow(
+        &mut self,
+        _: &ToggleOverflowPanel,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.show_overflow = !self.show_overflow;
         cx.notify();
     }
@@ -270,6 +290,8 @@ impl Render for Workspace {
             .text_color(t.text)
             .on_action(cx.listener(Self::toggle_overflow))
             .on_action(cx.listener(Self::cycle_theme))
+            .on_action(cx.listener(Self::toggle_markers))
+            .on_action(cx.listener(Self::open_lab))
             .on_action(cx.listener(Self::show_cheat_sheet))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_as))
@@ -645,6 +667,24 @@ mod tests {
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
         assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
+    }
+
+    #[gpui::test]
+    fn vim_gx_toggles_the_overflow_panel(cx: &mut TestAppContext) {
+        init(cx);
+        let mut config = Config::default();
+        config.editor.vim_mode = true;
+        let (ws, cx) =
+            cx.add_window_view(move |window, cx| Workspace::new(config, None, None, window, cx));
+        ws.update_in(cx, |ws, window, cx| ws.focus_editor(window, cx));
+        cx.run_until_parked();
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.update_in(cx, |e, window, cx| {
+            e.replace_text_in_range(None, "g", window, cx);
+            e.replace_text_in_range(None, "x", window, cx);
+        });
+        cx.run_until_parked();
+        assert!(ws.read_with(cx, |ws, _| ws.show_overflow));
     }
 
     #[gpui::test]
