@@ -19,6 +19,17 @@ pub struct EditorConfig {
     pub font_size: f32,
 }
 
+impl EditorConfig {
+    /// The configured font size, clamped to 8–72 (the default 18 if it isn't a finite number).
+    pub fn effective_font_size(&self) -> f32 {
+        if self.font_size.is_finite() {
+            self.font_size.clamp(8.0, 72.0)
+        } else {
+            18.0
+        }
+    }
+}
+
 impl Default for EditorConfig {
     fn default() -> Self {
         Self {
@@ -92,6 +103,23 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effective_font_size_is_clamped_and_finite() {
+        let size = |font_size| {
+            EditorConfig {
+                font_size,
+                ..EditorConfig::default()
+            }
+            .effective_font_size()
+        };
+        assert_eq!(size(20.0), 20.0);
+        assert_eq!(size(2.0), 8.0);
+        assert_eq!(size(-5.0), 8.0);
+        assert_eq!(size(500.0), 72.0);
+        assert_eq!(size(f32::NAN), 18.0);
+        assert_eq!(size(f32::INFINITY), 18.0);
+    }
 
     #[test]
     fn defaults_match_spec() {

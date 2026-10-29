@@ -36,7 +36,7 @@ impl IntoElement for EditorElement {
 }
 
 pub(crate) fn line_height(editor: &Editor) -> Pixels {
-    px(editor.config.editor.font_size * 1.6)
+    px(editor.config.editor.effective_font_size() * 1.6)
 }
 
 /// Shape every paragraph at `width`. GPUI caches shaped lines between frames, so this is cheap.
@@ -46,7 +46,7 @@ fn build_layout(
     origin: Point<Pixels>,
     window: &mut Window,
 ) -> LayoutCache {
-    let font_size = px(editor.config.editor.font_size);
+    let font_size = px(editor.config.editor.effective_font_size());
     let lh = line_height(editor);
     let style = RunStyle {
         font: font(editor.config.editor.font_family.clone()),
@@ -128,7 +128,7 @@ fn selection_quads(editor: &Editor, layout: &LayoutCache) -> Vec<PaintQuad> {
             let x0 = p.x_in_line(k, s);
             let mut x1 = p.x_in_line(k, e);
             if newline_marker {
-                x1 += px(editor.config.editor.font_size * 0.4);
+                x1 += px(editor.config.editor.effective_font_size() * 0.4);
             } else if e == line_end && !last_line {
                 x1 = layout.width;
             }
@@ -216,7 +216,7 @@ impl Element for EditorElement {
         let block = editor.vim_captures_text();
         let cursor = layout.window_point(editor.selection.head).map(|caret| {
             let width = if block {
-                px(editor.config.editor.font_size * 0.55)
+                px(editor.config.editor.effective_font_size() * 0.55)
             } else {
                 px(2.)
             };
