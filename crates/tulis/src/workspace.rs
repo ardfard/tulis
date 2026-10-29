@@ -300,6 +300,12 @@ impl Render for Workspace {
     }
 }
 
+/// Save As appended ".md" to the chosen name and that names an existing file the dialog never
+/// asked about.
+pub(crate) fn needs_overwrite_confirm(chosen: &Path, final_path: &Path) -> bool {
+    chosen != final_path && final_path.exists()
+}
+
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
@@ -310,6 +316,11 @@ impl Workspace {
         let Some(path) = self.path.clone() else {
             return false;
         };
+        // An emptied alternate being edited must not reach the sidecar.
+        self.editor.update(cx, |e, cx| {
+            e.finish_alt_edit();
+            cx.notify();
+        });
         let result = storage::save(&self.editor.read(cx).doc, &path);
         match result {
             Ok(()) => {
@@ -353,8 +364,25 @@ impl Workspace {
             let Ok(Ok(Some(mut path))) = answer.await else {
                 return;
             };
+            let chosen = path.clone();
             if path.extension().is_none() {
                 path.set_extension("md");
+            }
+            if needs_overwrite_confirm(&chosen, &path) {
+                let Ok(answer) = this.update_in(cx, |_, window, cx| {
+                    window.prompt(
+                        PromptLevel::Warning,
+                        &format!("Replace {}?", file_name(&path)),
+                        None,
+                        &["Replace", "Cancel"],
+                        cx,
+                    )
+                }) else {
+                    return;
+                };
+                if answer.await != Ok(0) {
+                    return;
+                }
             }
             this.update(cx, |ws, cx| {
                 ws.path = Some(path);
@@ -450,7 +478,74 @@ mod tests {
     use tulis_core::config::Config;
     use tulis_core::{DocPos, Selection};
 
-    use super::Workspace;
+    use super::{Workspace, needs_overwrite_confirm};
+    use crate::editor::AltEdit;
+
+    #[test]
+    fn overwrite_confirm_only_when_md_was_appended_onto_an_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let chosen = dir.path().join("essay");
+        let appended = dir.path().join("essay.md");
+        assert!(!needs_overwrite_confirm(&chosen, &appended));
+        std::fs::write(&appended, "x").unwrap();
+        assert!(needs_overwrite_confirm(&chosen, &appended));
+        assert!(!needs_overwrite_confirm(&appended, &appended));
+    }
+
+    #[gpui::test]
+    fn save_finishes_an_emptied_alternate_first(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("essay.md");
+        std::fs::write(&path, "Hello world\n").unwrap();
+        let open_path = path.clone();
+        let (ws, cx) = cx.add_window_view(move |window, cx| {
+            Workspace::new(Config::default(), None, Some(open_path), window, cx)
+        });
+        ws.update_in(cx, |ws, _, cx| {
+            ws.editor.update(cx, |e, _| {
+                e.doc.make_alt(0, 6..11).unwrap();
+                e.doc.edit_alt(0, 1, 0..5, "");
+                e.alt_edit = Some(AltEdit {
+                    para_id: e.doc.paragraphs[0].id,
+                    start: 6,
+                });
+                e.selection = Selection::caret(DocPos::new(0, 6));
+                e.dirty = true;
+                assert_eq!(e.doc.paragraphs[0].text(), "Hello ");
+            });
+            assert!(ws.save_now(cx));
+            assert!(ws.editor.read(cx).alt_edit.is_none());
+        });
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "Hello world\n");
+        let reopened = tulis_core::storage::open(&path).unwrap().document;
+        assert_eq!(reopened.paragraphs[0].text(), "Hello world");
+        assert!(
+            reopened.paragraphs[0]
+                .segments()
+                .iter()
+                .all(|s| !s.text().is_empty())
+        );
+    }
+
+    #[gpui::test]
+    fn non_utf8_file_shows_banner_and_keeps_document(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("latin1.md");
+        std::fs::write(&path, b"caf\xe9\n").unwrap();
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        ws.update_in(cx, |ws, window, cx| {
+            ws.editor.update(cx, |e, cx| {
+                e.replace_text_in_range(None, "draft", window, cx)
+            });
+            ws.open_path(path.clone(), cx);
+            assert_eq!(ws.path, None);
+            assert_eq!(ws.editor.read(cx).doc.paragraphs[0].text(), "draft");
+            let banner = ws.banner.clone().unwrap();
+            assert!(banner.ends_with("file is not valid UTF-8 text"), "{banner}");
+        });
+    }
 
     #[gpui::test]
     fn opens_command_line_path_and_saves(cx: &mut TestAppContext) {
