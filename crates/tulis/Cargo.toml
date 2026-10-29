@@ -2,6 +2,7 @@
 name = "tulis"
 edition.workspace = true
 version.workspace = true
+license.workspace = true
 
 [dependencies]
 chrono = "0.4.45"

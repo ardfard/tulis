@@ -80,3 +80,7 @@ the published version no longer compiles against current `libc`.
 - [ ] AI alternates (violet underline) and trim (red strike, Tab/Esc) with a real key; missing key notice without
 - [ ] Vim mode: motions, operators, visual, `]a`, `gh`; `vim_mode = true` starts in Normal
 - [ ] A missing font family falls back to a readable font
+
+## License
+
+[MIT](LICENSE). `vendor/xattr` is a patched copy of [xattr](https://crates.io/crates/xattr) 0.2.3, used under its original MIT/Apache-2.0 license.
