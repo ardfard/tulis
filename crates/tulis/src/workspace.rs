@@ -3,16 +3,18 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    App, ClickEvent, Context, Entity, Focusable, Hsla, MouseMoveEvent, PathPromptOptions,
-    PromptLevel, Subscription, Task, Window, div, linear_color_stop, linear_gradient, prelude::*,
-    px,
+    AnyElement, App, ClickEvent, Context, Entity, FocusHandle, Focusable, Hsla, MouseMoveEvent,
+    PathPromptOptions, PromptLevel, SharedString, Subscription, Task, Window, div,
+    linear_color_stop, linear_gradient, prelude::*, px,
 };
+use gpui_component::text::TextView;
 use tulis_core::config::Config;
 use tulis_core::storage;
 use tulis_core::{Document, OverflowId};
 
 use crate::actions::{
     CycleTheme, New, Open, OpenLab, Quit, Save, SaveAs, ToggleMarkers, ToggleOverflowPanel,
+    TogglePreview,
 };
 use crate::editor::{Editor, EditorEvent, GUTTER};
 use crate::header_dim::HeaderDim;
@@ -25,6 +27,8 @@ pub struct Workspace {
     pub(crate) keep_in_overflow: bool,
     pub(crate) banner: Option<String>,
     pub(crate) cheat_sheet: Option<Entity<crate::cheat_sheet::CheatSheet>>,
+    pub(crate) preview: Option<SharedString>,
+    preview_focus: FocusHandle,
     pub(crate) header_dim: HeaderDim,
     /// Repaints the header when its auto-dim state is due to change.
     pub(crate) dim_timer: Option<Task<()>>,
@@ -62,6 +66,8 @@ impl Workspace {
             keep_in_overflow: false,
             banner: None,
             cheat_sheet: None,
+            preview: None,
+            preview_focus: cx.focus_handle(),
             header_dim: HeaderDim::default(),
             dim_timer: None,
             window_title: String::new(),
@@ -273,6 +279,59 @@ fn edge_fade(top: bool, background: Hsla) -> impl IntoElement {
 }
 
 impl Workspace {
+    /// Swap the page for a read-only Markdown preview (export text: shown options, no ghosts),
+    /// or back.
+    pub(crate) fn toggle_preview(
+        &mut self,
+        _: &TogglePreview,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.preview.take().is_some() {
+            self.focus_editor(window, cx);
+        } else {
+            self.editor.update(cx, |e, _| {
+                e.finish_alt_edit();
+            });
+            let md = storage::export_markdown(&self.editor.read(cx).doc);
+            self.preview = Some(md.into());
+            window.focus(&self.preview_focus, cx);
+        }
+        cx.notify();
+    }
+
+    fn render_preview(&self, md: SharedString) -> impl IntoElement {
+        div()
+            .id("md-preview")
+            .key_context("Preview")
+            .track_focus(&self.preview_focus)
+            .flex_1()
+            .h_full()
+            .overflow_y_scroll()
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .py(px(COLUMN_PADDING_Y))
+                    .px(px(32.))
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(COLUMN_WIDTH))
+                            .child(TextView::markdown("md-preview-text", md).selectable(true)),
+                    ),
+            )
+    }
+
+    /// The page, or the Markdown preview while it is open.
+    fn render_main(&self, cx: &App) -> AnyElement {
+        match self.preview.clone() {
+            Some(md) => self.render_preview(md).into_any_element(),
+            None => self.render_page(cx).into_any_element(),
+        }
+    }
+
     /// The scrollable page: a centered column with fades over its top and bottom edges.
     fn render_page(&self, cx: &App) -> impl IntoElement {
         let editor = self.editor.read(cx);
@@ -327,6 +386,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::cycle_theme))
             .on_action(cx.listener(Self::toggle_markers))
             .on_action(cx.listener(Self::open_lab))
+            .on_action(cx.listener(Self::toggle_preview))
             .on_action(cx.listener(Self::show_cheat_sheet))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_as))
@@ -345,7 +405,7 @@ impl Render for Workspace {
                     .min_h(px(0.))
                     .flex()
                     .flex_row()
-                    .child(self.render_page(cx))
+                    .child(self.render_main(cx))
                     .when(self.show_overflow, |row| {
                         row.child(self.render_overflow(cx))
                     }),
@@ -769,6 +829,28 @@ mod tests {
         assert_eq!(width, gpui::px(super::COLUMN_WIDTH));
         // Centered: (1000 - 640) / 2 = 180.
         assert_eq!(x, gpui::px(180.));
+    }
+
+    #[gpui::test]
+    fn preview_shows_export_markdown_and_escape_closes_it(cx: &mut TestAppContext) {
+        init(cx);
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        ws.update_in(cx, |ws, window, cx| {
+            ws.editor.update(cx, |e, cx| {
+                e.replace_text_in_range(None, "I really love tea\nBye.", window, cx);
+                e.doc.set_ghost(0, 2..9, true).unwrap();
+            });
+            ws.toggle_preview(&crate::actions::TogglePreview, window, cx);
+        });
+        assert_eq!(
+            ws.read_with(cx, |ws, _| ws.preview.clone()).as_deref(),
+            Some("I love tea\n\nBye.\n")
+        );
+        cx.run_until_parked();
+        cx.simulate_keystrokes("escape");
+        assert!(ws.read_with(cx, |ws, _| ws.preview.is_none()));
     }
 
     #[gpui::test]

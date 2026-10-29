@@ -12,7 +12,7 @@ use tulis_core::alternates::AltLevel;
 use tulis_core::stats;
 use tulis_core::vim::Mode;
 
-use crate::actions::{ShowCheatSheet, ToggleMarkers};
+use crate::actions::{ShowCheatSheet, ToggleMarkers, TogglePreview};
 use crate::toast::{TOAST_LIFETIME, toast_opacity};
 use crate::workspace::{Workspace, file_name};
 
@@ -116,6 +116,7 @@ impl Workspace {
         let editor = self.editor.read(cx);
         let t = editor.theme;
         let show_markers = editor.show_markers;
+        let previewing = self.preview.is_some();
         let (counts, badges) = self.header_status(cx);
         let dimmed = self.header_dim.is_dimmed(Instant::now());
         let header = div()
@@ -147,21 +148,37 @@ impl Workspace {
                     })),
             )
             .child(
-                div().flex().flex_row().items_center().gap_1().child(
-                    Button::new("toggle-markers")
-                        .ghost()
-                        .xsmall()
-                        .icon(if show_markers {
-                            IconName::Eye
-                        } else {
-                            IconName::EyeOff
-                        })
-                        .selected(show_markers)
-                        .tooltip("Markers (Ctrl+.)")
-                        .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
-                            ws.toggle_markers(&ToggleMarkers, window, cx)
-                        })),
-                ),
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        Button::new("toggle-markers")
+                            .ghost()
+                            .xsmall()
+                            .icon(if show_markers {
+                                IconName::Eye
+                            } else {
+                                IconName::EyeOff
+                            })
+                            .selected(show_markers)
+                            .tooltip("Markers (Ctrl+.)")
+                            .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
+                                ws.toggle_markers(&ToggleMarkers, window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("toggle-preview")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::FileText)
+                            .selected(previewing)
+                            .tooltip("Markdown preview (Ctrl+Shift+M)")
+                            .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
+                                ws.toggle_preview(&TogglePreview, window, cx)
+                            })),
+                    ),
             )
             .child(
                 div().flex_1().flex().flex_row().justify_end().child(
