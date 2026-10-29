@@ -60,9 +60,12 @@ pub fn document_counts(doc: &Document) -> Counts {
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            let text = p.export_text();
+            // The title is detected on the full text (as rendering does), so a ghosted `#`
+            // still hides the marker.
+            let text = p.text();
             let skip = if i == 0 { title_marker_len(&text) } else { 0 };
-            Counts::of(&text[skip..])
+            let range = DocPos::new(i, skip)..DocPos::new(i, text.len());
+            Counts::of(&doc.export_text_in(range))
         })
         .fold(Counts::default(), Counts::add)
 }
@@ -126,6 +129,13 @@ mod tests {
                 chars: 18
             }
         );
+    }
+
+    #[test]
+    fn document_counts_detect_the_title_with_a_ghosted_hash() {
+        let mut doc = Document::from_texts(&["# My title"]);
+        doc.set_ghost(0, 0..1, true).unwrap();
+        assert_eq!(document_counts(&doc), Counts { words: 2, chars: 8 });
     }
 
     #[test]

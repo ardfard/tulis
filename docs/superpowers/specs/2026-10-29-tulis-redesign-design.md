@@ -322,8 +322,8 @@ variants. `]m`/`[m` join `]a`/`[a`.
 - Every AI failure (missing key, HTTP, parse, refusal) toasts the v1 message, and the document is
   unchanged. Partial Lab failures toast "N of M paragraphs failed".
 - A missing font falls back silently. An unknown theme toasts and uses Midnight.
-- Share without network: the clipboard copy still succeeds, and if `open_url` fails, a toast says
-  "Copied — couldn't open the browser".
+- Share always copies to the clipboard first; GPUI's `open_url` reports no failure, so the toast
+  reads 'Copied — opening the browser'.
 
 ## Testing
 

@@ -4,6 +4,9 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 pub const TOAST_LIFETIME: Duration = Duration::from_secs(3);
+/// A toast is solid until its last 20%, then fades out over `TOAST_FADE`.
+pub const TOAST_FADE_AT: Duration = Duration::from_millis(2400);
+pub const TOAST_FADE: Duration = Duration::from_millis(600);
 /// At most this many toasts are stacked; a new one pushes out the oldest.
 pub const MAX_TOASTS: usize = 2;
 
@@ -11,6 +14,8 @@ pub const MAX_TOASTS: usize = 2;
 pub struct Toast {
     pub id: u64,
     pub text: String,
+    /// Set once the fade-out has begun; only then does the toast animate.
+    pub fading: bool,
 }
 
 #[derive(Debug, Default)]
@@ -31,6 +36,7 @@ impl ToastQueue {
         self.toasts.push_back(Toast {
             id: self.next_id,
             text,
+            fading: false,
         });
         while self.toasts.len() > MAX_TOASTS {
             self.toasts.pop_front();
@@ -43,19 +49,16 @@ impl ToastQueue {
         self.toasts.retain(|t| t.id != id);
     }
 
+    /// Begin a toast's fade-out. Unknown ids (removed or replaced) are ignored.
+    pub fn start_fade(&mut self, id: u64) {
+        if let Some(t) = self.toasts.iter_mut().find(|t| t.id == id) {
+            t.fading = true;
+        }
+    }
+
     /// Showing toasts, oldest first.
     pub fn iter(&self) -> impl Iterator<Item = &Toast> {
         self.toasts.iter()
-    }
-}
-
-/// Opacity at `progress` (0..=1) through a toast's lifetime: solid for 80%, then fading out.
-pub fn toast_opacity(progress: f32) -> f32 {
-    const SOLID: f32 = 0.8;
-    if progress <= SOLID {
-        1.
-    } else {
-        (1. - (progress - SOLID) / (1. - SOLID)).clamp(0., 1.)
     }
 }
 
@@ -97,10 +100,21 @@ mod tests {
     }
 
     #[test]
-    fn opacity_is_solid_then_fades() {
-        assert_eq!(toast_opacity(0.), 1.);
-        assert_eq!(toast_opacity(0.8), 1.);
-        assert!((toast_opacity(0.9) - 0.5).abs() < 1e-5);
-        assert_eq!(toast_opacity(1.), 0.);
+    fn fade_starts_in_the_last_fifth_and_only_for_the_right_toast() {
+        assert_eq!(TOAST_FADE_AT + TOAST_FADE, TOAST_LIFETIME);
+        assert_eq!(
+            TOAST_FADE_AT.as_millis(),
+            TOAST_LIFETIME.as_millis() * 4 / 5
+        );
+        let mut q = ToastQueue::default();
+        let a = q.push("a");
+        assert!(q.iter().all(|t| !t.fading));
+        q.start_fade(999);
+        assert!(q.iter().all(|t| !t.fading));
+        q.start_fade(a);
+        assert!(q.iter().next().unwrap().fading);
+        // Repeating the text restarts the toast: the replacement is solid again.
+        q.push("a");
+        assert!(!q.iter().next().unwrap().fading);
     }
 }

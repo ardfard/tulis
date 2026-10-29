@@ -57,6 +57,9 @@ impl Render for CheatSheet {
         let t = self.theme;
         let sections = self.sections(cx);
         div()
+            // The dialog lives outside the workspace's element tree, so the toggle key must be
+            // handled here for it to close the sheet while the filter has focus.
+            .on_action(cx.listener(|_, _: &ShowCheatSheet, window, cx| window.close_dialog(cx)))
             .flex()
             .flex_col()
             .gap_3()

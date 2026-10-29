@@ -27,7 +27,7 @@ pub struct Workspace {
     pub(crate) keep_in_overflow: bool,
     pub(crate) banner: Option<String>,
     pub(crate) cheat_sheet: Option<Entity<crate::cheat_sheet::CheatSheet>>,
-    pub(crate) preview: Option<SharedString>,
+    pub(crate) preview: bool,
     preview_focus: FocusHandle,
     pub(crate) header_dim: HeaderDim,
     /// Repaints the header when its auto-dim state is due to change.
@@ -66,7 +66,7 @@ impl Workspace {
             keep_in_overflow: false,
             banner: None,
             cheat_sheet: None,
-            preview: None,
+            preview: false,
             preview_focus: cx.focus_handle(),
             header_dim: HeaderDim::default(),
             dim_timer: None,
@@ -287,17 +287,22 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.preview.take().is_some() {
+        if std::mem::take(&mut self.preview) {
             self.focus_editor(window, cx);
         } else {
             self.editor.update(cx, |e, _| {
                 e.finish_alt_edit();
             });
-            let md = storage::export_markdown(&self.editor.read(cx).doc);
-            self.preview = Some(md.into());
+            self.preview = true;
             window.focus(&self.preview_focus, cx);
         }
         cx.notify();
+    }
+
+    /// The Markdown shown while the preview is open, computed from the live document.
+    pub(crate) fn preview_text(&self, cx: &App) -> Option<String> {
+        self.preview
+            .then(|| storage::export_markdown(&self.editor.read(cx).doc))
     }
 
     fn render_preview(&self, md: SharedString) -> impl IntoElement {
@@ -326,8 +331,8 @@ impl Workspace {
 
     /// The page, or the Markdown preview while it is open.
     fn render_main(&self, cx: &App) -> AnyElement {
-        match self.preview.clone() {
-            Some(md) => self.render_preview(md).into_any_element(),
+        match self.preview_text(cx) {
+            Some(md) => self.render_preview(md.into()).into_any_element(),
             None => self.render_page(cx).into_any_element(),
         }
     }
@@ -339,6 +344,7 @@ impl Workspace {
         div()
             .relative()
             .flex_1()
+            .min_w(px(0.))
             .h_full()
             .child(
                 div()
@@ -757,6 +763,28 @@ mod tests {
     }
 
     #[gpui::test]
+    fn cheat_sheet_key_closes_it_while_the_filter_has_focus(cx: &mut TestAppContext) {
+        use gpui::AppContext as _;
+        use gpui_component::WindowExt;
+        init(cx);
+        let (root, cx) = cx.add_window_view(|window, cx| {
+            let ws = cx.new(|cx| Workspace::new(Config::default(), None, None, window, cx));
+            gpui_component::Root::new(ws, window, cx)
+        });
+        let ws = root.read_with(cx, |root, _| {
+            root.view().clone().downcast::<Workspace>().unwrap()
+        });
+        ws.update_in(cx, |ws, window, cx| {
+            ws.show_cheat_sheet(&crate::actions::ShowCheatSheet, window, cx)
+        });
+        cx.run_until_parked();
+        assert!(cx.update(|window, cx| window.has_active_dialog(cx)));
+        cx.simulate_keystrokes("secondary-shift-/");
+        cx.run_until_parked();
+        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
+    }
+
+    #[gpui::test]
     fn vim_gx_toggles_the_overflow_panel(cx: &mut TestAppContext) {
         init(cx);
         let mut config = Config::default();
@@ -799,6 +827,31 @@ mod tests {
     }
 
     #[gpui::test]
+    fn toast_is_solid_then_fades_in_its_last_fifth(cx: &mut TestAppContext) {
+        init(cx);
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.update(cx, |e, cx| e.set_notice("hello", cx));
+        let fading = |cx: &mut gpui::VisualTestContext| {
+            editor.read_with(cx, |e, _| {
+                e.toasts.iter().map(|t| t.fading).collect::<Vec<_>>()
+            })
+        };
+        cx.run_until_parked();
+        cx.executor().advance_clock(crate::toast::TOAST_FADE_AT / 2);
+        cx.run_until_parked();
+        assert_eq!(fading(cx), vec![false]);
+        cx.executor().advance_clock(crate::toast::TOAST_FADE_AT / 2);
+        cx.run_until_parked();
+        assert_eq!(fading(cx), vec![true]);
+        cx.executor().advance_clock(crate::toast::TOAST_FADE);
+        cx.run_until_parked();
+        assert!(fading(cx).is_empty());
+    }
+
+    #[gpui::test]
     fn cycling_the_theme_recolors_components(cx: &mut TestAppContext) {
         init(cx);
         let (ws, cx) = cx.add_window_view(|window, cx| {
@@ -835,6 +888,21 @@ mod tests {
     }
 
     #[gpui::test]
+    fn column_shrinks_with_a_narrow_window(cx: &mut TestAppContext) {
+        init(cx);
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        cx.simulate_resize(gpui::size(gpui::px(580.), gpui::px(800.)));
+        cx.run_until_parked();
+        let width = ws.read_with(cx, |ws, cx| {
+            ws.editor.read(cx).layout.as_ref().expect("painted").width
+        });
+        // 580 - 2 * 32 padding - 2 * 24 gutter.
+        assert_eq!(width, gpui::px(468.));
+    }
+
+    #[gpui::test]
     fn preview_shows_export_markdown_and_escape_closes_it(cx: &mut TestAppContext) {
         init(cx);
         let (ws, cx) = cx.add_window_view(|window, cx| {
@@ -848,12 +916,22 @@ mod tests {
             ws.toggle_preview(&crate::actions::TogglePreview, window, cx);
         });
         assert_eq!(
-            ws.read_with(cx, |ws, _| ws.preview.clone()).as_deref(),
+            ws.read_with(cx, |ws, cx| ws.preview_text(cx)).as_deref(),
             Some("I love tea\n\nBye.\n")
+        );
+        // The preview follows the document while it is open.
+        ws.update_in(cx, |ws, window, cx| {
+            ws.editor.update(cx, |e, cx| {
+                e.replace_text_in_range(None, "Changed", window, cx);
+            });
+        });
+        assert_eq!(
+            ws.read_with(cx, |ws, cx| ws.preview_text(cx)).as_deref(),
+            Some("I love tea\n\nBye.Changed\n")
         );
         cx.run_until_parked();
         cx.simulate_keystrokes("escape");
-        assert!(ws.read_with(cx, |ws, _| ws.preview.is_none()));
+        assert!(ws.read_with(cx, |ws, cx| ws.preview_text(cx)).is_none());
     }
 
     #[gpui::test]

@@ -60,6 +60,11 @@ fn build_layout(
         title_font,
         color: editor.theme.text,
         trim: editor.theme.trim,
+        marker: {
+            let mut c = editor.theme.text_muted;
+            c.a *= 0.5;
+            c
+        },
         ghost_alpha: editor.theme.ghost_alpha,
     };
     let marked = editor.marked.clone().map(|r| {
@@ -82,12 +87,16 @@ fn build_layout(
             marked.and_then(|(a, b)| (a.para == i && b.para == i).then(|| a.offset..b.offset));
         let text_len = text.len();
         let title_marker = if i == 0 { title_marker_len(&text) } else { 0 };
+        let caret_on_marker = i == 0
+            && editor.selection.head.para == 0
+            && editor.selection.head.offset < title_marker;
         let runs = build_runs(
             text_len,
             &p.spans(),
             &trims,
             marked_here,
             title_marker,
+            caret_on_marker,
             &style,
         );
         let line = window
@@ -111,7 +120,11 @@ fn build_layout(
 
 /// Dotted underlines under alternate groups, version bars with their handles (recorded in
 /// `layout.version_handles` for clicks), and the box around a group just cycled.
-fn marker_quads(editor: &Editor, layout: &mut LayoutCache) -> Vec<PaintQuad> {
+fn marker_quads(
+    editor: &Editor,
+    layout: &mut LayoutCache,
+    view: Option<(Pixels, Pixels)>,
+) -> Vec<PaintQuad> {
     let t = &editor.theme;
     let lh = layout.line_height;
     let font_size = px(editor.config.editor.effective_font_size());
@@ -119,6 +132,9 @@ fn marker_quads(editor: &Editor, layout: &mut LayoutCache) -> Vec<PaintQuad> {
     let mut quads = Vec::new();
     for (ix, (p, pl)) in editor.doc.paragraphs.iter().zip(&layout.paras).enumerate() {
         let para_top = layout.origin.y + pl.top;
+        if !markers::intersects_viewport(para_top, pl.height(lh), view, lh) {
+            continue;
+        }
         for span in p.spans() {
             let Some(mark) = span.alt else { continue };
             let color = if mark.ai { t.accent } else { t.text_muted };
@@ -261,7 +277,9 @@ impl Element for EditorElement {
             window.request_measured_layout(style, move |known, available, window, cx| {
                 let width = known.width.unwrap_or(match available.width {
                     AvailableSpace::Definite(width) => width,
-                    _ => px(640.) + GUTTER * 2.,
+                    // No content-based minimum: the column may shrink with the window.
+                    AvailableSpace::MinContent => GUTTER * 2.,
+                    AvailableSpace::MaxContent => px(640.) + GUTTER * 2.,
                 });
                 let text_width = (width - GUTTER * 2.).max(px(1.));
                 let layout =
@@ -287,7 +305,11 @@ impl Element for EditorElement {
         let lh = layout.line_height;
         let selection = selection_quads(editor, &layout);
         let markers = if editor.show_markers {
-            marker_quads(editor, &mut layout)
+            // Cull to the scroll viewport (known once it has been laid out).
+            let viewport = editor.scroll.bounds();
+            let view = (viewport.size.height > px(0.))
+                .then(|| (viewport.origin.y, viewport.origin.y + viewport.size.height));
+            marker_quads(editor, &mut layout, view)
         } else {
             Vec::new()
         };

@@ -12,6 +12,8 @@ pub struct RunStyle {
     pub title_font: Font,
     pub color: Hsla,
     pub trim: Hsla,
+    /// The `# ` marker's color while the caret sits on it (otherwise it is not drawn).
+    pub marker: Hsla,
     pub ghost_alpha: f32,
 }
 
@@ -21,6 +23,7 @@ pub fn build_runs(
     trims: &[Range<usize>],
     marked: Option<Range<usize>>,
     title_marker: usize,
+    caret_on_marker: bool,
     style: &RunStyle,
 ) -> Vec<TextRun> {
     let title_marker = title_marker.min(text_len);
@@ -47,9 +50,14 @@ pub fn build_runs(
             if ghost {
                 color.a *= style.ghost_alpha;
             }
-            // The title's `# ` stays in the text but is not drawn.
+            // The title's `# ` stays in the text but is not drawn, unless the caret is on it
+            // (then the block cursor needs something under it).
             if b <= title_marker {
-                color.a = 0.;
+                if caret_on_marker {
+                    color = style.marker;
+                } else {
+                    color.a = 0.;
+                }
             }
             // Alternates are marked with painted dots (see `editor::markers`), not underlines.
             let underline = in_marked.then(|| UnderlineStyle {
@@ -92,6 +100,7 @@ mod tests {
             title_font,
             color: hsla(0., 0., 0., 1.),
             trim: hsla(0., 1., 0.5, 1.),
+            marker: hsla(0., 0., 0.5, 0.5),
             ghost_alpha: 0.1,
         }
     }
@@ -115,7 +124,7 @@ mod tests {
                 alt: None,
             },
         ];
-        let runs = build_runs(10, &spans, &[7..9], None, 0, &style());
+        let runs = build_runs(10, &spans, &[7..9], None, 0, false, &style());
         assert_eq!(
             runs.iter().map(|r| r.len).collect::<Vec<_>>(),
             vec![2, 4, 1, 2, 1]
@@ -133,13 +142,29 @@ mod tests {
             ghost: false,
             alt: None,
         }];
-        let runs = build_runs(7, &spans, &[], None, 2, &style());
+        let runs = build_runs(7, &spans, &[], None, 2, false, &style());
         assert_eq!(runs.iter().map(|r| r.len).collect::<Vec<_>>(), vec![2, 5]);
         assert_eq!(runs[0].color.a, 0.);
         assert_eq!(runs[1].color.a, 1.);
         assert!(runs.iter().all(|r| r.font.weight == FontWeight::BOLD));
-        let plain = build_runs(7, &spans, &[], None, 0, &style());
+        let plain = build_runs(7, &spans, &[], None, 0, false, &style());
         assert!(plain.iter().all(|r| r.font.weight != FontWeight::BOLD));
+    }
+
+    #[test]
+    fn title_marker_shows_muted_while_the_caret_is_on_it() {
+        let spans = vec![Span {
+            range: 0..7,
+            ghost: false,
+            alt: None,
+        }];
+        let hidden = build_runs(7, &spans, &[], None, 2, false, &style());
+        assert_eq!(hidden[0].color.a, 0.);
+        let shown = build_runs(7, &spans, &[], None, 2, true, &style());
+        assert_eq!(shown[0].color, style().marker);
+        assert!(shown[0].color.a > 0.);
+        // The title text itself is untouched.
+        assert_eq!(shown[1].color.a, 1.);
     }
 
     #[test]
@@ -149,7 +174,7 @@ mod tests {
             ghost: false,
             alt: None,
         }];
-        let runs = build_runs(5, &spans, &[], Some(1..3), 0, &style());
+        let runs = build_runs(5, &spans, &[], Some(1..3), 0, false, &style());
         assert_eq!(
             runs.iter().map(|r| r.len).collect::<Vec<_>>(),
             vec![1, 2, 2]
@@ -160,6 +185,6 @@ mod tests {
 
     #[test]
     fn empty_text_has_no_runs() {
-        assert!(build_runs(0, &[], &[], None, 0, &style()).is_empty());
+        assert!(build_runs(0, &[], &[], None, 0, false, &style()).is_empty());
     }
 }

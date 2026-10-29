@@ -17,7 +17,7 @@ use crate::actions::{
     Open, OpenLab, Save, ShareLinkedIn, ShareX, ShowCheatSheet, ToggleMarkers, ToggleOverflowPanel,
     TogglePreview,
 };
-use crate::toast::{TOAST_LIFETIME, toast_opacity};
+use crate::toast::TOAST_FADE;
 use crate::workspace::{Workspace, file_name};
 
 pub const HEADER_HEIGHT: f32 = 40.;
@@ -61,11 +61,19 @@ impl Workspace {
                     .text_xs()
                     .text_color(t.text)
                     .child(toast.text.clone())
-                    .with_animation(
-                        ("toast-fade", toast.id),
-                        Animation::new(TOAST_LIFETIME),
-                        |el, progress| el.opacity(toast_opacity(progress)),
-                    )
+                    // Solid (no per-frame redraw) until the fade begins.
+                    .map(|el| {
+                        if toast.fading {
+                            el.with_animation(
+                                ("toast-fade", toast.id),
+                                Animation::new(TOAST_FADE),
+                                |el, progress| el.opacity(1. - progress),
+                            )
+                            .into_any_element()
+                        } else {
+                            el.into_any_element()
+                        }
+                    })
             }))
     }
 
@@ -121,7 +129,7 @@ impl Workspace {
         let editor = self.editor.read(cx);
         let t = editor.theme;
         let show_markers = editor.show_markers;
-        let previewing = self.preview.is_some();
+        let previewing = self.preview;
         let (counts, badges) = self.header_status(cx);
         let dimmed = self.header_dim.is_dimmed(Instant::now());
         let header = div()

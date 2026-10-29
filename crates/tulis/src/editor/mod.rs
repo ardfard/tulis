@@ -30,7 +30,7 @@ pub(crate) use element::GUTTER;
 use layout::LayoutCache;
 
 use crate::theme::{self, Theme};
-use crate::toast::{TOAST_LIFETIME, ToastQueue};
+use crate::toast::{TOAST_FADE_AT, TOAST_LIFETIME, ToastQueue};
 
 pub type Snapshot = (Document, Selection);
 
@@ -155,11 +155,19 @@ impl Editor {
         cx.notify();
     }
 
-    /// Show a toast; it is removed after `TOAST_LIFETIME`.
+    /// Show a toast; it fades from `TOAST_FADE_AT` and is removed after `TOAST_LIFETIME`.
     pub fn set_notice(&mut self, notice: impl Into<String>, cx: &mut Context<Self>) {
         let id = self.toasts.push(notice);
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(TOAST_LIFETIME).await;
+            cx.background_executor().timer(TOAST_FADE_AT).await;
+            this.update(cx, |e, cx| {
+                e.toasts.start_fade(id);
+                cx.notify();
+            })
+            .ok();
+            cx.background_executor()
+                .timer(TOAST_LIFETIME - TOAST_FADE_AT)
+                .await;
             this.update(cx, |e, cx| {
                 e.toasts.remove(id);
                 cx.notify();

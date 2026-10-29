@@ -95,9 +95,34 @@ pub fn handle_at(handles: &[(usize, Bounds<Pixels>)], position: Point<Pixels>) -
         .map(|(para, _)| *para)
 }
 
+/// Whether a paragraph spanning `top..top + height` touches the viewport `view` (a `(top,
+/// bottom)` pair, with `margin` of slack). `None` means the viewport is unknown: draw everything.
+pub fn intersects_viewport(
+    top: Pixels,
+    height: Pixels,
+    view: Option<(Pixels, Pixels)>,
+    margin: Pixels,
+) -> bool {
+    view.is_none_or(|(view_top, view_bottom)| {
+        top + height >= view_top - margin && top <= view_bottom + margin
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paragraphs_outside_the_viewport_are_culled() {
+        let view = Some((px(100.), px(500.)));
+        let m = px(10.);
+        assert!(intersects_viewport(px(200.), px(50.), view, m));
+        assert!(intersects_viewport(px(80.), px(30.), view, m)); // straddles the top
+        assert!(intersects_viewport(px(490.), px(50.), view, m)); // straddles the bottom
+        assert!(!intersects_viewport(px(0.), px(50.), view, m)); // above
+        assert!(!intersects_viewport(px(600.), px(50.), view, m)); // below
+        assert!(intersects_viewport(px(900.), px(50.), None, m)); // unknown viewport
+    }
 
     #[test]
     fn ranges_split_across_wrapped_lines() {

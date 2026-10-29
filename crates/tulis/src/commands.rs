@@ -600,7 +600,17 @@ mod tests {
             VimCommand::CheatSheet => "cheat_sheet",
             VimCommand::Lab => "open_lab",
             VimCommand::ToggleOverflow => "toggle_overflow",
-            _ => return None,
+            // Pure motions and editing grammar: no command-table row.
+            VimCommand::Move { .. }
+            | VimCommand::Operate { .. }
+            | VimCommand::OperateParagraphs { .. }
+            | VimCommand::OperateSelection { .. }
+            | VimCommand::DeleteChars { .. }
+            | VimCommand::Put { .. }
+            | VimCommand::EnterInsert(_)
+            | VimCommand::BeginVisual
+            | VimCommand::EndVisual
+            | VimCommand::ExitInsert => return None,
         })
     }
 
@@ -611,6 +621,39 @@ mod tests {
                 let ids: Vec<_> = feed(keys).iter().filter_map(vim_id).collect();
                 assert_eq!(ids, vec![c.id], "vim keys {keys:?} of {}", c.id);
             }
+        }
+    }
+
+    /// The other direction: every user-facing vim command (the exhaustive `vim_id` match above
+    /// fails to compile for a new variant) has a table row that lists vim keys.
+    #[test]
+    fn user_facing_vim_commands_have_table_rows_with_vim_keys() {
+        let commands = [
+            VimCommand::Undo { count: 1 },
+            VimCommand::Redo { count: 1 },
+            VimCommand::CycleAlt {
+                forward: true,
+                count: 1,
+            },
+            VimCommand::CycleAlt {
+                forward: false,
+                count: 1,
+            },
+            VimCommand::ToggleGhost,
+            VimCommand::CycleTheme,
+            VimCommand::ToggleMarkers,
+            VimCommand::TogglePreview,
+            VimCommand::CheatSheet,
+            VimCommand::Lab,
+            VimCommand::ToggleOverflow,
+        ];
+        for command in &commands {
+            let id = vim_id(command).expect("user-facing command has an id");
+            let row = COMMANDS.iter().find(|c| c.id == id);
+            assert!(
+                row.is_some_and(|c| c.vim.is_some()),
+                "{command:?} maps to {id}, which needs a table row with vim keys"
+            );
         }
     }
 
