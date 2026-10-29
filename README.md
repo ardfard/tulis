@@ -61,9 +61,6 @@ num_alternates = 3
 cargo test --workspace
 ```
 
-`vendor/xattr` is `xattr 0.2.3` with a one-line Linux fix. GPUI 0.2.2 depends on it indirectly, and
-the published version no longer compiles against current `libc`.
-
 ### Manual smoke checklist
 
 - [ ] Window opens; text wraps in a centered column; status bar shows name, word count
@@ -83,4 +80,4 @@ the published version no longer compiles against current `libc`.
 
 ## License
 
-[MIT](LICENSE). `vendor/xattr` is a patched copy of [xattr](https://crates.io/crates/xattr) 0.2.3, used under its original MIT/Apache-2.0 license.
+[MIT](LICENSE).

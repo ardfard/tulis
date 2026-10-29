@@ -1,67 +1,92 @@
 //! Key bindings. `secondary` is Cmd on macOS and Ctrl elsewhere.
 
-use gpui::{App, KeyBinding};
+use std::rc::Rc;
+
+use gpui::{Action, App, KeyBinding, KeyBindingContextPredicate};
 
 use crate::actions::*;
 
+/// `KeyBinding::new` only accepts explicit modifiers in gpui-pre; `load` resolves `secondary-`
+/// to Cmd or Ctrl for the host OS.
+fn binding(keys: &str, action: impl Action, context: Option<&str>, cx: &App) -> KeyBinding {
+    let context =
+        context.map(|c| Rc::new(KeyBindingContextPredicate::parse(c).expect("valid key context")));
+    KeyBinding::load(keys, Box::new(action), context, false, None, cx)
+        .unwrap_or_else(|e| panic!("bad keystroke {keys:?}: {e:?}"))
+}
+
 pub fn bind(cx: &mut App) {
     let ed = Some("Editor");
-    cx.bind_keys([
-        KeyBinding::new("backspace", Backspace, ed),
-        KeyBinding::new("delete", Delete, ed),
-        KeyBinding::new("left", Left, ed),
-        KeyBinding::new("right", Right, ed),
-        KeyBinding::new("up", Up, ed),
-        KeyBinding::new("down", Down, ed),
-        KeyBinding::new("shift-left", SelectLeft, ed),
-        KeyBinding::new("shift-right", SelectRight, ed),
-        KeyBinding::new("shift-up", SelectUp, ed),
-        KeyBinding::new("shift-down", SelectDown, ed),
-        KeyBinding::new("alt-left", WordLeft, ed),
-        KeyBinding::new("alt-right", WordRight, ed),
-        KeyBinding::new("ctrl-left", WordLeft, ed),
-        KeyBinding::new("ctrl-right", WordRight, ed),
-        KeyBinding::new("shift-alt-left", SelectWordLeft, ed),
-        KeyBinding::new("shift-alt-right", SelectWordRight, ed),
-        KeyBinding::new("ctrl-shift-left", SelectWordLeft, ed),
-        KeyBinding::new("ctrl-shift-right", SelectWordRight, ed),
-        KeyBinding::new("home", Home, ed),
-        KeyBinding::new("end", End, ed),
-        KeyBinding::new("shift-home", SelectHome, ed),
-        KeyBinding::new("shift-end", SelectEnd, ed),
-        KeyBinding::new("pageup", PageUp, ed),
-        KeyBinding::new("pagedown", PageDown, ed),
-        KeyBinding::new("ctrl-home", DocStart, ed),
-        KeyBinding::new("ctrl-end", DocEnd, ed),
-        KeyBinding::new("secondary-up", DocStart, ed),
-        KeyBinding::new("secondary-down", DocEnd, ed),
-        KeyBinding::new("enter", Newline, ed),
-        KeyBinding::new("shift-enter", Newline, ed),
-        KeyBinding::new("secondary-a", SelectAll, ed),
-        KeyBinding::new("secondary-c", Copy, ed),
-        KeyBinding::new("secondary-x", Cut, ed),
-        KeyBinding::new("secondary-v", Paste, ed),
-        KeyBinding::new("secondary-z", Undo, ed),
-        KeyBinding::new("secondary-shift-z", Redo, ed),
-        KeyBinding::new("ctrl-y", Redo, ed),
-        KeyBinding::new("secondary-d", MakeAlternate, ed),
-        KeyBinding::new("alt-up", CyclePrev, ed),
-        KeyBinding::new("alt-down", CycleNext, ed),
-        KeyBinding::new("secondary-enter", AcceptAlternate, ed),
-        KeyBinding::new("secondary-shift-backspace", DeleteAlternate, ed),
-        KeyBinding::new("secondary-g", ToggleGhost, ed),
-        KeyBinding::new("secondary-shift-o", SendToOverflow, ed),
-        KeyBinding::new("secondary-\\", ToggleOverflowPanel, None),
-        KeyBinding::new("secondary-j", AiAlternates, ed),
-        KeyBinding::new("secondary-shift-t", AiTrimParagraph, ed),
-        KeyBinding::new("secondary-shift-alt-t", AiTrimDocument, ed),
-        KeyBinding::new("tab", AcceptTrim, ed),
-        KeyBinding::new("escape", Cancel, ed),
-        KeyBinding::new("secondary-alt-v", ToggleVim, ed),
-        KeyBinding::new("secondary-s", Save, None),
-        KeyBinding::new("secondary-shift-s", SaveAs, None),
-        KeyBinding::new("secondary-o", Open, None),
-        KeyBinding::new("secondary-n", New, None),
-        KeyBinding::new("secondary-q", Quit, None),
-    ]);
+    let bindings = [
+        binding("backspace", Backspace, ed, cx),
+        binding("delete", Delete, ed, cx),
+        binding("left", Left, ed, cx),
+        binding("right", Right, ed, cx),
+        binding("up", Up, ed, cx),
+        binding("down", Down, ed, cx),
+        binding("shift-left", SelectLeft, ed, cx),
+        binding("shift-right", SelectRight, ed, cx),
+        binding("shift-up", SelectUp, ed, cx),
+        binding("shift-down", SelectDown, ed, cx),
+        binding("alt-left", WordLeft, ed, cx),
+        binding("alt-right", WordRight, ed, cx),
+        binding("ctrl-left", WordLeft, ed, cx),
+        binding("ctrl-right", WordRight, ed, cx),
+        binding("shift-alt-left", SelectWordLeft, ed, cx),
+        binding("shift-alt-right", SelectWordRight, ed, cx),
+        binding("ctrl-shift-left", SelectWordLeft, ed, cx),
+        binding("ctrl-shift-right", SelectWordRight, ed, cx),
+        binding("home", Home, ed, cx),
+        binding("end", End, ed, cx),
+        binding("shift-home", SelectHome, ed, cx),
+        binding("shift-end", SelectEnd, ed, cx),
+        binding("pageup", PageUp, ed, cx),
+        binding("pagedown", PageDown, ed, cx),
+        binding("ctrl-home", DocStart, ed, cx),
+        binding("ctrl-end", DocEnd, ed, cx),
+        binding("secondary-up", DocStart, ed, cx),
+        binding("secondary-down", DocEnd, ed, cx),
+        binding("enter", Newline, ed, cx),
+        binding("shift-enter", Newline, ed, cx),
+        binding("secondary-a", SelectAll, ed, cx),
+        binding("secondary-c", Copy, ed, cx),
+        binding("secondary-x", Cut, ed, cx),
+        binding("secondary-v", Paste, ed, cx),
+        binding("secondary-z", Undo, ed, cx),
+        binding("secondary-shift-z", Redo, ed, cx),
+        binding("ctrl-y", Redo, ed, cx),
+        binding("secondary-d", MakeAlternate, ed, cx),
+        binding("alt-up", CyclePrev, ed, cx),
+        binding("alt-down", CycleNext, ed, cx),
+        binding("secondary-enter", AcceptAlternate, ed, cx),
+        binding("secondary-shift-backspace", DeleteAlternate, ed, cx),
+        binding("secondary-g", ToggleGhost, ed, cx),
+        binding("secondary-shift-o", SendToOverflow, ed, cx),
+        binding("secondary-\\", ToggleOverflowPanel, None, cx),
+        binding("secondary-j", AiAlternates, ed, cx),
+        binding("secondary-shift-t", AiTrimParagraph, ed, cx),
+        binding("secondary-shift-alt-t", AiTrimDocument, ed, cx),
+        binding("tab", AcceptTrim, ed, cx),
+        binding("escape", Cancel, ed, cx),
+        binding("secondary-alt-v", ToggleVim, ed, cx),
+        binding("secondary-s", Save, None, cx),
+        binding("secondary-shift-s", SaveAs, None, cx),
+        binding("secondary-o", Open, None, cx),
+        binding("secondary-n", New, None, cx),
+        binding("secondary-q", Quit, None, cx),
+    ];
+    cx.bind_keys(bindings);
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn all_bindings_load(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            super::bind(cx);
+            assert_eq!(cx.key_bindings().borrow().bindings().len(), 56);
+        });
+    }
 }

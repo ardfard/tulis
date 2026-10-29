@@ -63,7 +63,8 @@ impl Workspace {
     }
 
     pub fn focus_editor(&self, window: &mut Window, cx: &mut App) {
-        window.focus(&self.editor.focus_handle(cx));
+        let handle = self.editor.focus_handle(cx);
+        window.focus(&handle, cx);
     }
 
     pub(crate) fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {

@@ -250,7 +250,7 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         let Some(layout) = self.layout.as_ref() else {
             return;
         };

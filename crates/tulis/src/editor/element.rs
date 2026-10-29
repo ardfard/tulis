@@ -161,7 +161,7 @@ fn scroll_into_view(scroll: &ScrollHandle, caret: Point<Pixels>, line_height: Pi
     } else {
         return false;
     }
-    offset.y = clamp_px(offset.y, -scroll.max_offset().height, px(0.));
+    offset.y = clamp_px(offset.y, -scroll.max_offset().y, px(0.));
     scroll.set_offset(offset);
     true
 }

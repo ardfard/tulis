@@ -6,7 +6,3 @@ members = ["crates/tulis-core", "crates/tulis"]
 edition = "2024"
 version = "0.1.0"
 license = "MIT"
-
-# gpui 0.2.2 pulls xattr 0.2.3, which references libc::ENOATTR (gone on Linux).
-[patch.crates-io]
-xattr = { path = "vendor/xattr" }
