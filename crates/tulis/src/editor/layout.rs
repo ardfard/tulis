@@ -1,6 +1,6 @@
 //! The last frame's layout: wrapped lines per paragraph, used for hit-testing and vertical moves.
 
-use gpui::{Pixels, Point, WrappedLine, point, px};
+use gpui::{Bounds, Pixels, Point, WrappedLine, point, px};
 use tulis_core::DocPos;
 
 pub(crate) fn clamp_px(value: Pixels, low: Pixels, high: Pixels) -> Pixels {
@@ -86,6 +86,8 @@ pub struct LayoutCache {
     pub width: Pixels,
     pub line_height: Pixels,
     pub paras: Vec<ParaLayout>,
+    /// Clickable `⋮` handles of paragraphs with versions: (paragraph index, window bounds).
+    pub version_handles: Vec<(usize, Bounds<Pixels>)>,
 }
 
 impl LayoutCache {
@@ -201,6 +203,7 @@ mod tests {
                 line_starts,
                 text_len,
             }],
+            version_handles: Vec::new(),
         }
     }
 

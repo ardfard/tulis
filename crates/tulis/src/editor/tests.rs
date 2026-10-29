@@ -680,3 +680,54 @@ fn vim_gl_runs_the_document_trim_until_the_lab_exists(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(editor.read_with(cx, |e, _| e.trims.len()), 1);
 }
+
+#[gpui::test]
+fn cycling_boxes_the_group_until_the_cursor_leaves(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    editor.update(cx, |e, _| {
+        e.doc.make_alt(0, 2..6).unwrap();
+        e.doc.edit_alt(0, 1, 0..4, "adore");
+        e.selection = Selection::caret(DocPos::new(0, 3));
+    });
+    editor.update_in(cx, |e, window, cx| e.cycle_next(&CycleNext, window, cx));
+    let cycled = editor.read_with(cx, |e, _| e.cycled.clone()).unwrap();
+    assert_eq!(cycled.range, 2..6);
+    editor.update_in(cx, |e, window, cx| e.left(&Left, window, cx));
+    assert!(editor.read_with(cx, |e, _| e.cycled.is_some()));
+    editor.update_in(cx, |e, window, cx| e.home(&Home, window, cx));
+    assert!(editor.read_with(cx, |e, _| e.cycled.is_none()));
+}
+
+#[gpui::test]
+fn clicking_the_version_handle_shows_the_next_version(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Draft one."]);
+    editor.update_in(cx, |e, window, cx| {
+        e.make_alternate(&MakeAlternate, window, cx);
+        e.replace_text_in_range(None, " Two.", window, cx);
+    });
+    cx.simulate_resize(gpui::size(gpui::px(800.), gpui::px(600.)));
+    cx.run_until_parked();
+    let handle = editor.read_with(cx, |e, _| {
+        let layout = e.layout.as_ref().expect("painted");
+        assert_eq!(layout.version_handles.len(), 1);
+        layout.version_handles[0].1
+    });
+    let before = editor.read_with(cx, |e, _| e.doc.paragraphs[0].active);
+    cx.simulate_click(handle.center(), gpui::Modifiers::none());
+    let after = editor.read_with(cx, |e, _| e.doc.paragraphs[0].active);
+    assert_ne!(before, after);
+    assert!(editor.read_with(cx, |e, _| e.cycled.is_some()));
+}
+
+#[gpui::test]
+fn hidden_markers_record_no_handles(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Draft one."]);
+    editor.update_in(cx, |e, window, cx| {
+        e.make_alternate(&MakeAlternate, window, cx);
+        e.toggle_markers(cx);
+    });
+    cx.simulate_resize(gpui::size(gpui::px(800.), gpui::px(600.)));
+    cx.run_until_parked();
+    let handles = editor.read_with(cx, |e, _| e.layout.as_ref().unwrap().version_handles.len());
+    assert_eq!(handles, 0);
+}

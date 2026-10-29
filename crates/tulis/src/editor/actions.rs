@@ -254,6 +254,12 @@ impl Editor {
         let Some(layout) = self.layout.as_ref() else {
             return;
         };
+        if let Some(para) = super::markers::handle_at(&layout.version_handles, event.position)
+            && para < self.doc.paragraphs.len()
+        {
+            self.next_version(para, cx);
+            return;
+        }
         let pos = self.doc.clamp(layout.pos_for_window_point(event.position));
         self.is_selecting = true;
         match event.click_count {

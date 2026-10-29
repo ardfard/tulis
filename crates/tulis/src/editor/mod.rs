@@ -6,6 +6,7 @@ mod element;
 mod features;
 mod input;
 pub mod layout;
+mod markers;
 #[cfg(test)]
 mod tests;
 mod vim_exec;
@@ -48,6 +49,13 @@ pub struct TrimSuggestion {
     pub range: Range<usize>,
 }
 
+/// The group (or paragraph, for versions) just cycled; boxed until the cursor leaves it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CycledGroup {
+    pub para_id: ParaId,
+    pub range: Range<usize>,
+}
+
 /// The alternate group being edited (see "alternate-editing state" in the spec).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AltEdit {
@@ -64,6 +72,7 @@ pub struct Editor {
     pub trims: Vec<TrimSuggestion>,
     pub vim: Option<Vim>,
     pub alt_edit: Option<AltEdit>,
+    pub cycled: Option<CycledGroup>,
     pub ai_task: Option<Task<()>>,
     pub scroll: ScrollHandle,
     pub theme: Theme,
@@ -107,6 +116,7 @@ impl Editor {
             trims: Vec::new(),
             vim,
             alt_edit: None,
+            cycled: None,
             ai_task: None,
             scroll: ScrollHandle::new(),
             theme: theme_id.theme(),
@@ -136,6 +146,7 @@ impl Editor {
         self.history = History::new(HISTORY_LIMIT);
         self.trims.clear();
         self.alt_edit = None;
+        self.cycled = None;
         self.ai_task = None;
         self.marked = None;
         self.goal_x = None;
@@ -252,6 +263,7 @@ impl Editor {
         let (doc, selection) = (&self.doc, self.selection);
         self.history
             .record(kind, Instant::now(), || (doc.clone(), selection));
+        self.cycled = None;
         let end = touched.end.min(self.doc.paragraphs.len());
         let ids: Vec<ParaId> = self
             .doc
@@ -282,10 +294,22 @@ impl Editor {
         if self.alt_edit.is_some() && self.alt_edit_target(self.selection.range()).is_none() {
             self.finish_alt_edit();
         }
+        if !self.in_cycled(self.selection.head) {
+            self.cycled = None;
+        }
         self.marked = None;
         self.history.break_coalescing();
         self.autoscroll = true;
         cx.notify();
+    }
+
+    /// Whether `pos` lies in the cycled group (edges included). False when there is none.
+    fn in_cycled(&self, pos: DocPos) -> bool {
+        self.cycled.as_ref().is_some_and(|c| {
+            self.doc.para_index(c.para_id) == Some(pos.para)
+                && c.range.start <= pos.offset
+                && pos.offset <= c.range.end
+        })
     }
 
     /// End alternate editing. Also shifts the selection; returns the shift for other positions.
@@ -465,6 +489,7 @@ impl Editor {
 
     fn after_history(&mut self, cx: &mut Context<Self>) {
         self.alt_edit = None;
+        self.cycled = None;
         // A restored snapshot may hold an alternate whose active option is empty.
         for para in 0..self.doc.paragraphs.len() {
             for seg in (0..self.doc.paragraphs[para].segments().len()).rev() {

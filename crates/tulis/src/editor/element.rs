@@ -1,13 +1,14 @@
 //! The custom element that shapes and paints the document.
 
 use gpui::{
-    App, AvailableSpace, Bounds, ElementId, ElementInputHandler, Entity, FontWeight,
+    App, AvailableSpace, BorderStyle, Bounds, ElementId, ElementInputHandler, Entity, FontWeight,
     GlobalElementId, InspectorElementId, LayoutId, PaintQuad, Pixels, Point, ScrollHandle, Style,
-    TextAlign, Window, fill, font, point, prelude::*, px, relative, size,
+    TextAlign, Window, fill, font, outline, point, prelude::*, px, relative, size,
 };
 
 use super::Editor;
 use super::layout::{LayoutCache, ParaLayout, clamp_px};
+use super::markers::{self, DOT};
 use crate::runs::{RunStyle, build_runs};
 use tulis_core::stats::title_marker_len;
 
@@ -24,6 +25,7 @@ impl EditorElement {
 pub struct EditorPrepaint {
     layout: LayoutCache,
     selection: Vec<PaintQuad>,
+    markers: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
 }
 
@@ -57,8 +59,6 @@ fn build_layout(
         font: font(editor.font_family.clone()),
         title_font,
         color: editor.theme.text,
-        alt_underline: editor.theme.text_muted,
-        ai_underline: editor.theme.accent,
         trim: editor.theme.trim,
         ghost_alpha: editor.theme.ghost_alpha,
     };
@@ -105,7 +105,62 @@ fn build_layout(
         width,
         line_height: lh,
         paras,
+        version_handles: Vec::new(),
     }
+}
+
+/// Dotted underlines under alternate groups, version bars with their handles (recorded in
+/// `layout.version_handles` for clicks), and the box around a group just cycled.
+fn marker_quads(editor: &Editor, layout: &mut LayoutCache) -> Vec<PaintQuad> {
+    let t = &editor.theme;
+    let lh = layout.line_height;
+    let font_size = px(editor.config.editor.effective_font_size());
+    let left = layout.origin.x;
+    let mut quads = Vec::new();
+    for (ix, (p, pl)) in editor.doc.paragraphs.iter().zip(&layout.paras).enumerate() {
+        let para_top = layout.origin.y + pl.top;
+        for span in p.spans() {
+            let Some(mark) = span.alt else { continue };
+            let color = if mark.ai { t.accent } else { t.text_muted };
+            for (k, r) in markers::split_by_lines(&pl.line_starts, pl.line.len(), span.range) {
+                let x0 = left + pl.x_in_line(k, r.start);
+                let x1 = left + pl.x_in_line(k, r.end);
+                let y = markers::underline_y(para_top + lh * k as f32, lh, font_size);
+                for x in markers::dot_xs(f32::from(x0), f32::from(x1)) {
+                    let dot = Bounds::new(point(px(x), y), size(px(DOT), px(DOT)));
+                    quads.push(fill(dot, color));
+                }
+            }
+        }
+        if p.versions.len() > 1 {
+            let height = pl.height(lh);
+            let mut bar = t.accent;
+            bar.a *= 0.6;
+            quads.push(fill(markers::version_bar(left, para_top, height), bar));
+            let handle = markers::version_handle(left, para_top, height);
+            let c = handle.center();
+            let gap = Bounds::new(point(c.x - px(2.), c.y - px(7.)), size(px(4.), px(14.)));
+            quads.push(fill(gap, t.background));
+            quads.extend(markers::handle_dots(handle).map(|dot| fill(dot, t.accent)));
+            layout.version_handles.push((ix, handle));
+        }
+    }
+    if let Some(cycled) = &editor.cycled
+        && let Some(ix) = editor.doc.para_index(cycled.para_id)
+        && let Some(pl) = layout.paras.get(ix)
+    {
+        let mut color = t.text_muted;
+        color.a *= 0.4;
+        let range = cycled.range.clone();
+        for (k, r) in markers::split_by_lines(&pl.line_starts, pl.line.len(), range) {
+            let line_top = layout.origin.y + pl.top + lh * k as f32;
+            let x0 = left + pl.x_in_line(k, r.start);
+            let x1 = left + pl.x_in_line(k, r.end);
+            let bounds = markers::group_box(x0, x1, line_top, lh);
+            quads.push(outline(bounds, color, BorderStyle::Solid).corner_radii(px(3.)));
+        }
+    }
+    quads
 }
 
 fn selection_quads(editor: &Editor, layout: &LayoutCache) -> Vec<PaintQuad> {
@@ -228,9 +283,14 @@ impl Element for EditorElement {
         let editor = self.editor.read(cx);
         let text_origin = point(bounds.origin.x + GUTTER, bounds.origin.y);
         let text_width = (bounds.size.width - GUTTER * 2.).max(px(1.));
-        let layout = build_layout(editor, text_width, text_origin, window);
+        let mut layout = build_layout(editor, text_width, text_origin, window);
         let lh = layout.line_height;
         let selection = selection_quads(editor, &layout);
+        let markers = if editor.show_markers {
+            marker_quads(editor, &mut layout)
+        } else {
+            Vec::new()
+        };
         let block = editor.vim_captures_text();
         let cursor = layout.window_point(editor.selection.head).map(|caret| {
             let width = if block {
@@ -259,6 +319,7 @@ impl Element for EditorElement {
         Some(EditorPrepaint {
             layout,
             selection,
+            markers,
             cursor,
         })
     }
@@ -292,6 +353,9 @@ impl Element for EditorElement {
             para.line
                 .paint(origin, lh, TextAlign::Left, None, window, cx)
                 .ok();
+        }
+        for quad in prepaint.markers {
+            window.paint_quad(quad);
         }
         if focus_handle.is_focused(window) {
             if let Some(cursor) = prepaint.cursor {
