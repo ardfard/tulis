@@ -22,7 +22,7 @@ impl Editor {
         cx.notify();
     }
 
-    pub(super) fn toggle_vim(&mut self, _: &ToggleVim, _: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_vim(&mut self, _: &ToggleVim, _: &mut Window, cx: &mut Context<Self>) {
         self.vim = if self.vim.is_some() {
             None
         } else {

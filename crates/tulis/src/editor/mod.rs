@@ -32,6 +32,15 @@ use crate::toast::{TOAST_LIFETIME, ToastQueue};
 
 pub type Snapshot = (Document, Selection);
 
+/// Events the workspace listens for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditorEvent {
+    /// A character was typed into the page (drives the header's auto-dim).
+    Typed,
+}
+
+impl gpui::EventEmitter<EditorEvent> for Editor {}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrimSuggestion {
     pub para_id: ParaId,
@@ -361,6 +370,9 @@ impl Editor {
         } else {
             EditKind::Other
         };
+        if matches!(kind, EditKind::Typing { .. }) {
+            cx.emit(EditorEvent::Typed);
+        }
         if !text.contains('\n')
             && let Some((para, seg, local)) = self.alt_edit_target(range.clone())
         {

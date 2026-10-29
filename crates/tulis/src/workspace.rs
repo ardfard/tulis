@@ -1,21 +1,20 @@
-//! The root view: the writing column, the overflow panel, the status bar and file commands.
+//! The root view: header, page, overflow panel, footer, toasts and file commands.
 
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    App, ClickEvent, Context, Entity, Focusable, PathPromptOptions, PromptLevel, Window, div,
-    prelude::*, px,
+    App, ClickEvent, Context, Entity, Focusable, MouseMoveEvent, PathPromptOptions, PromptLevel,
+    Subscription, Task, Window, div, prelude::*, px,
 };
-use tulis_core::alternates::AltLevel;
 use tulis_core::config::Config;
 use tulis_core::storage;
-use tulis_core::vim::Mode;
 use tulis_core::{Document, OverflowId};
 
 use crate::actions::{
     CycleTheme, New, Open, OpenLab, Quit, Save, SaveAs, ToggleMarkers, ToggleOverflowPanel,
 };
-use crate::editor::Editor;
+use crate::editor::{Editor, EditorEvent};
+use crate::header_dim::HeaderDim;
 use crate::theme;
 
 pub struct Workspace {
@@ -25,6 +24,11 @@ pub struct Workspace {
     pub(crate) keep_in_overflow: bool,
     pub(crate) banner: Option<String>,
     pub(crate) cheat_sheet: Option<Entity<crate::cheat_sheet::CheatSheet>>,
+    pub(crate) header_dim: HeaderDim,
+    /// Repaints the header when its auto-dim state is due to change.
+    pub(crate) dim_timer: Option<Task<()>>,
+    pub(crate) window_title: String,
+    _subscriptions: Vec<Subscription>,
 }
 
 pub(crate) fn file_name(path: &Path) -> String {
@@ -42,7 +46,12 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(|cx| Editor::new(config, Document::new(), cx));
-        cx.observe(&editor, |_, _, cx| cx.notify()).detach();
+        let subscriptions = vec![
+            cx.observe(&editor, |_, _, cx| cx.notify()),
+            cx.subscribe(&editor, |ws, _, event: &EditorEvent, cx| match event {
+                EditorEvent::Typed => ws.typed(cx),
+            }),
+        ];
         let initial_theme = editor.read(cx).theme;
         theme::apply_to_components(&initial_theme, cx);
         let mut workspace = Self {
@@ -52,6 +61,10 @@ impl Workspace {
             keep_in_overflow: false,
             banner: None,
             cheat_sheet: None,
+            header_dim: HeaderDim::default(),
+            dim_timer: None,
+            window_title: String::new(),
+            _subscriptions: subscriptions,
         };
         if let Some(path) = path {
             workspace.open_path(path, cx);
@@ -98,53 +111,6 @@ impl Workspace {
                 cx.notify();
             }
         }
-    }
-
-    fn render_status(&self, cx: &App) -> impl IntoElement {
-        let editor = self.editor.read(cx);
-        let t = editor.theme;
-        let name = self
-            .path
-            .as_deref()
-            .map(file_name)
-            .unwrap_or_else(|| "Untitled".into());
-        let dirty = if editor.dirty { " •" } else { "" };
-        let mut parts = vec![
-            format!("{name}{dirty}"),
-            format!("{} words", editor.doc.word_count()),
-        ];
-        if let Some(info) = editor.doc.alt_info(editor.cursor()) {
-            let label = match info.level {
-                AltLevel::Word => "alt",
-                AltLevel::Paragraph => "ver",
-            };
-            parts.push(format!("{label} {}/{}", info.index + 1, info.count));
-        }
-        if let Some(mode) = editor.vim_mode() {
-            parts.push(
-                match mode {
-                    Mode::Normal => "NORMAL",
-                    Mode::Insert => "INSERT",
-                    Mode::Visual => "VISUAL",
-                    Mode::VisualLine => "V-LINE",
-                }
-                .into(),
-            );
-        }
-        if editor.ai_task.is_some() {
-            parts.push("AI…".into());
-        }
-        div()
-            .flex()
-            .flex_row()
-            .justify_between()
-            .px_4()
-            .py_1()
-            .border_t_1()
-            .border_color(t.rule)
-            .text_xs()
-            .text_color(t.text_muted)
-            .child(parts.join("  ·  "))
     }
 }
 
@@ -278,7 +244,8 @@ impl Workspace {
 }
 
 impl Render for Workspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_window_title(window, cx);
         let t = self.editor.read(cx).theme;
         let scroll = self.editor.read(cx).scroll.clone();
         div()
@@ -288,6 +255,11 @@ impl Render for Workspace {
             .flex_col()
             .bg(t.background)
             .text_color(t.text)
+            .on_mouse_move(cx.listener(|ws, _: &MouseMoveEvent, _, cx| {
+                if ws.header_dim.on_mouse_move() {
+                    cx.notify();
+                }
+            }))
             .on_action(cx.listener(Self::toggle_overflow))
             .on_action(cx.listener(Self::cycle_theme))
             .on_action(cx.listener(Self::toggle_markers))
@@ -298,6 +270,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::open))
             .on_action(cx.listener(Self::new_file))
             .on_action(cx.listener(Self::quit))
+            .child(self.render_header(cx))
             .children(
                 self.banner
                     .clone()
@@ -332,7 +305,6 @@ impl Render for Workspace {
                         row.child(self.render_overflow(cx))
                     }),
             )
-            .child(self.render_status(cx))
             .child(self.render_toasts(cx))
     }
 }
@@ -531,6 +503,7 @@ mod tests {
 
     #[gpui::test]
     fn save_finishes_an_emptied_alternate_first(cx: &mut TestAppContext) {
+        init(cx);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("essay.md");
         std::fs::write(&path, "Hello world\n").unwrap();
@@ -566,6 +539,7 @@ mod tests {
 
     #[gpui::test]
     fn non_utf8_file_shows_banner_and_keeps_document(cx: &mut TestAppContext) {
+        init(cx);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("latin1.md");
         std::fs::write(&path, b"caf\xe9\n").unwrap();
@@ -586,6 +560,7 @@ mod tests {
 
     #[gpui::test]
     fn opens_command_line_path_and_saves(cx: &mut TestAppContext) {
+        init(cx);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("essay.md");
         std::fs::write(&path, "Hello.\n").unwrap();
@@ -609,6 +584,7 @@ mod tests {
 
     #[gpui::test]
     fn missing_path_starts_a_new_file_there(cx: &mut TestAppContext) {
+        init(cx);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("new.md");
         let open_path = path.clone();
@@ -625,6 +601,7 @@ mod tests {
 
     #[gpui::test]
     fn save_without_path_reports_false(cx: &mut TestAppContext) {
+        init(cx);
         let (ws, cx) = cx.add_window_view(|window, cx| {
             Workspace::new(Config::default(), None, None, window, cx)
         });
@@ -641,6 +618,7 @@ mod tests {
 
     #[gpui::test]
     fn cheat_sheet_opens_filters_and_closes_on_escape(cx: &mut TestAppContext) {
+        init(cx);
         use gpui::AppContext as _;
         use gpui_component::WindowExt;
         init(cx);
@@ -690,6 +668,7 @@ mod tests {
 
     #[gpui::test]
     fn toasts_stack_two_and_expire(cx: &mut TestAppContext) {
+        init(cx);
         let (ws, cx) = cx.add_window_view(|window, cx| {
             Workspace::new(Config::default(), None, None, window, cx)
         });
@@ -728,5 +707,43 @@ mod tests {
         let paper = crate::theme::ThemeId::Paper.theme();
         assert_eq!(background(cx), paper.background);
         assert!(!cx.update(|_, cx| gpui_component::Theme::global(cx).mode.is_dark()));
+    }
+
+    #[gpui::test]
+    fn header_shows_counts_selection_counts_and_vim_badge(cx: &mut TestAppContext) {
+        init(cx);
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        ws.update_in(cx, |ws, window, cx| {
+            ws.editor.update(cx, |e, cx| {
+                e.replace_text_in_range(None, "# Title here", window, cx);
+            });
+            assert_eq!(ws.header_status(cx).0, "2 words · 10 chars");
+            ws.editor.update(cx, |e, cx| {
+                e.selection = Selection {
+                    anchor: DocPos::new(0, 2),
+                    head: DocPos::new(0, 7),
+                };
+                e.toggle_vim(&crate::actions::ToggleVim, window, cx);
+            });
+            let (counts, badges) = ws.header_status(cx);
+            assert_eq!(counts, "1 word · 5 chars selected");
+            assert_eq!(badges, vec!["NORMAL".to_string()]);
+        });
+    }
+
+    #[gpui::test]
+    fn typing_starts_a_dim_burst_and_mouse_move_ends_it(cx: &mut TestAppContext) {
+        init(cx);
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.update_in(cx, |e, window, cx| {
+            e.replace_text_in_range(None, "a", window, cx)
+        });
+        assert!(ws.read_with(cx, |ws, _| ws.dim_timer.is_some()));
+        ws.update(cx, |ws, _| assert!(ws.header_dim.on_mouse_move()));
     }
 }
