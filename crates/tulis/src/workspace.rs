@@ -22,6 +22,7 @@ pub struct Workspace {
     pub(crate) show_overflow: bool,
     pub(crate) keep_in_overflow: bool,
     pub(crate) banner: Option<String>,
+    pub(crate) cheat_sheet: Option<Entity<crate::cheat_sheet::CheatSheet>>,
 }
 
 pub(crate) fn file_name(path: &Path) -> String {
@@ -48,6 +49,7 @@ impl Workspace {
             show_overflow: false,
             keep_in_overflow: false,
             banner: None,
+            cheat_sheet: None,
         };
         if let Some(path) = path {
             workspace.open_path(path, cx);
@@ -268,6 +270,7 @@ impl Render for Workspace {
             .text_color(t.text)
             .on_action(cx.listener(Self::toggle_overflow))
             .on_action(cx.listener(Self::cycle_theme))
+            .on_action(cx.listener(Self::show_cheat_sheet))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_as))
             .on_action(cx.listener(Self::open))
@@ -605,9 +608,48 @@ mod tests {
         ws.update_in(cx, |ws, _, cx| assert!(!ws.save_now(cx)));
     }
 
+    /// gpui-component widgets need their globals; some tests also press keys.
+    fn init(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::keymap::bind(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn cheat_sheet_opens_filters_and_closes_on_escape(cx: &mut TestAppContext) {
+        use gpui::AppContext as _;
+        use gpui_component::WindowExt;
+        init(cx);
+        let (root, cx) = cx.add_window_view(|window, cx| {
+            let ws = cx.new(|cx| Workspace::new(Config::default(), None, None, window, cx));
+            gpui_component::Root::new(ws, window, cx)
+        });
+        let ws = root.read_with(cx, |root, _| {
+            root.view().clone().downcast::<Workspace>().unwrap()
+        });
+        ws.update_in(cx, |ws, window, cx| {
+            ws.show_cheat_sheet(&crate::actions::ShowCheatSheet, window, cx)
+        });
+        cx.run_until_parked();
+        assert!(cx.update(|window, cx| window.has_active_dialog(cx)));
+        let sheet = ws.read_with(cx, |ws, _| ws.cheat_sheet.clone().unwrap());
+        sheet.update_in(cx, |sheet, window, cx| {
+            sheet
+                .filter
+                .update(cx, |input, cx| input.set_value("theme", window, cx));
+            let sections = sheet.sections(cx);
+            assert_eq!(sections.len(), 1);
+            assert_eq!(sections[0].1[0].label, "Cycle theme");
+        });
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
+    }
+
     #[gpui::test]
     fn cycling_the_theme_recolors_components(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        init(cx);
         let (ws, cx) = cx.add_window_view(|window, cx| {
             Workspace::new(Config::default(), None, None, window, cx)
         });

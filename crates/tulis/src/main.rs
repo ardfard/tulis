@@ -1,4 +1,6 @@
 mod actions;
+mod cheat_sheet;
+mod commands;
 mod editor;
 mod keymap;
 mod runs;
