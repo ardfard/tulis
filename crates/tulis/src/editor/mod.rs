@@ -286,6 +286,13 @@ impl Editor {
 
     /// Replace the selection with `text` (newlines split paragraphs).
     pub fn insert_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        let normalized;
+        let text = if text.contains('\r') {
+            normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+            normalized.as_str()
+        } else {
+            text
+        };
         let range = self.selection.range();
         let kind = if text.chars().count() == 1 && text != "\n" && range.start == range.end {
             EditKind::Typing {

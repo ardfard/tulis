@@ -534,3 +534,19 @@ fn ai_alternates_on_part_of_a_group_rewrite_the_whole_group(cx: &mut TestAppCont
     let info = editor.read_with(cx, |e, _| e.doc.alt_info(DocPos::new(0, 3)).unwrap());
     assert_eq!(info.count, 3, "existing options are kept");
 }
+
+#[gpui::test]
+fn carriage_return_while_editing_an_alternate_splits_the_paragraph(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    select(&editor, cx, DocPos::new(0, 2), DocPos::new(0, 6));
+    editor.update_in(cx, |e, window, cx| {
+        e.make_alternate(&MakeAlternate, window, cx);
+        e.replace_text_in_range(None, "a\rb", window, cx);
+    });
+    assert_eq!(texts(&editor, cx), vec!["I a", "b tea"]);
+    editor.update_in(cx, |e, window, cx| {
+        e.select_all(&SelectAll, window, cx);
+        e.replace_text_in_range(None, "x\r\ny", window, cx);
+    });
+    assert_eq!(texts(&editor, cx), vec!["x", "y"]);
+}

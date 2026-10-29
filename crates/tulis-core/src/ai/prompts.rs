@@ -35,7 +35,7 @@ pub fn parse_alternates(response: &str, original: &str) -> Vec<String> {
     });
     let mut out: Vec<String> = Vec::new();
     for item in raw {
-        let item = item.trim().to_string();
+        let item = single_line(&item);
         if !item.is_empty() && item != original.trim() && !out.contains(&item) {
             out.push(item);
         }
@@ -92,6 +92,15 @@ pub fn locate_trims(cuts: &[String], paragraph: &Paragraph) -> Vec<Range<usize>>
     }
     found.sort_by_key(|r| r.start);
     found
+}
+
+/// Collapse each run of line breaks (with the whitespace around it) to one space, then trim.
+fn single_line(text: &str) -> String {
+    text.split(['\r', '\n'])
+        .map(str::trim)
+        .filter(|piece| !piece.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn json_array(response: &str) -> Option<Vec<String>> {
@@ -155,6 +164,17 @@ mod tests {
         assert_eq!(
             parse_alternates(r#"["love", " adore ", "adore", ""]"#, "love"),
             vec!["adore"]
+        );
+    }
+
+    #[test]
+    fn parse_alternates_collapses_line_breaks_to_spaces() {
+        assert_eq!(
+            parse_alternates(
+                "[\"one\\n two\", \"a \\r\\n\\r\\n b\\n\", \"\\rc\\rd\"]",
+                "x"
+            ),
+            vec!["one two", "a b", "c d"]
         );
     }
 
