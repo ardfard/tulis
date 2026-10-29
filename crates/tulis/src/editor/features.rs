@@ -249,7 +249,7 @@ impl Editor {
     }
 
     /// Esc: cancel AI, else dismiss trims, else stop editing an alternate.
-    pub(super) fn cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
         if self.ai_task.take().is_some() {
             return self.set_notice("AI request cancelled", cx);
         }
@@ -258,6 +258,9 @@ impl Editor {
             return self.set_notice("Trim suggestions dismissed", cx);
         }
         self.finish_alt_edit();
+        if self.vim.is_some() {
+            self.vim_key(tulis_core::vim::VimKey::Escape, window, cx);
+        }
         cx.notify();
     }
 }

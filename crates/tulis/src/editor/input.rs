@@ -68,9 +68,15 @@ impl EntityInputHandler for Editor {
         &mut self,
         range_utf16: Option<Range<usize>>,
         text: &str,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.vim_captures_text() {
+            for ch in text.chars() {
+                self.vim_key(tulis_core::vim::VimKey::Char(ch), window, cx);
+            }
+            return;
+        }
         let flat = self.doc.flat_text();
         if let Some(range) = range_utf16
             .map(|r| utf16::range_from_utf16(&flat, &r))
@@ -90,6 +96,9 @@ impl EntityInputHandler for Editor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.vim_captures_text() {
+            return;
+        }
         let flat = self.doc.flat_text();
         let range = range_utf16
             .map(|r| utf16::range_from_utf16(&flat, &r))

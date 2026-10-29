@@ -9,6 +9,7 @@ use gpui::{
 use tulis_core::alternates::AltLevel;
 use tulis_core::config::Config;
 use tulis_core::storage;
+use tulis_core::vim::Mode;
 use tulis_core::{Document, OverflowId};
 
 use crate::actions::{New, Open, Quit, Save, SaveAs, ToggleOverflowPanel};
@@ -110,6 +111,17 @@ impl Workspace {
                 AltLevel::Paragraph => "ver",
             };
             parts.push(format!("{label} {}/{}", info.index + 1, info.count));
+        }
+        if let Some(mode) = editor.vim_mode() {
+            parts.push(
+                match mode {
+                    Mode::Normal => "NORMAL",
+                    Mode::Insert => "INSERT",
+                    Mode::Visual => "VISUAL",
+                    Mode::VisualLine => "V-LINE",
+                }
+                .into(),
+            );
         }
         if editor.ai_task.is_some() {
             parts.push("AI…".into());

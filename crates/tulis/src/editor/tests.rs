@@ -375,3 +375,98 @@ fn missing_api_key_is_reported(cx: &mut TestAppContext) {
         Some("Set $TULIS_TEST_NO_SUCH_KEY to use AI".to_string())
     );
 }
+
+use tulis_core::vim::{Mode, Vim};
+
+fn vim_editor<'a>(
+    cx: &'a mut TestAppContext,
+    texts: &[&str],
+) -> (Entity<Editor>, &'a mut VisualTestContext) {
+    let (editor, cx) = editor_with(cx, texts);
+    editor.update(cx, |e, _| e.vim = Some(Vim::new()));
+    (editor, cx)
+}
+
+#[gpui::test]
+fn vim_delete_word_undo_and_delete_char(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["hello world"]);
+    type_str(&editor, cx, "dw");
+    assert_eq!(texts(&editor, cx), vec!["world"]);
+    assert_eq!(editor.read_with(cx, |e, _| e.register.clone()), "hello ");
+    type_str(&editor, cx, "u");
+    assert_eq!(texts(&editor, cx), vec!["hello world"]);
+    type_str(&editor, cx, "x");
+    assert_eq!(texts(&editor, cx), vec!["ello world"]);
+    type_str(&editor, cx, "p");
+    assert_eq!(texts(&editor, cx), vec!["ehllo world"]);
+}
+
+#[gpui::test]
+fn vim_insert_mode_types_and_escape_returns_to_normal(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &[""]);
+    type_str(&editor, cx, "iab");
+    assert_eq!(texts(&editor, cx), vec!["ab"]);
+    editor.update_in(cx, |e, window, cx| e.cancel(&Cancel, window, cx));
+    editor.read_with(cx, |e, _| {
+        assert_eq!(e.vim_mode(), Some(Mode::Normal));
+        assert_eq!(e.cursor(), DocPos::new(0, 1));
+    });
+}
+
+#[gpui::test]
+fn vim_paragraph_delete_and_put(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["a", "b", "c"]);
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(1, 0)));
+    type_str(&editor, cx, "dd");
+    assert_eq!(texts(&editor, cx), vec!["a", "c"]);
+    type_str(&editor, cx, "p");
+    assert_eq!(texts(&editor, cx), vec!["a", "c", "b"]);
+    assert_eq!(editor.read_with(cx, |e, _| e.cursor()), DocPos::new(2, 0));
+}
+
+#[gpui::test]
+fn vim_change_word_and_open_paragraph(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["old text"]);
+    type_str(&editor, cx, "cwnew");
+    assert_eq!(texts(&editor, cx), vec!["new text"]);
+    editor.update_in(cx, |e, window, cx| e.cancel(&Cancel, window, cx));
+    type_str(&editor, cx, "onext");
+    assert_eq!(texts(&editor, cx), vec!["new text", "next"]);
+}
+
+#[gpui::test]
+fn vim_visual_delete_is_inclusive(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["abcdef"]);
+    type_str(&editor, cx, "lvlld");
+    assert_eq!(texts(&editor, cx), vec!["aef"]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.vim_mode()),
+        Some(Mode::Normal)
+    );
+}
+
+#[gpui::test]
+fn vim_alternate_and_ghost_shortcuts(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["I love tea"]);
+    editor.update(cx, |e, _| {
+        e.doc.make_alt(0, 2..6).unwrap();
+        e.doc.edit_alt(0, 1, 0..4, "adore");
+        e.selection = Selection::caret(DocPos::new(0, 3));
+    });
+    type_str(&editor, cx, "[a");
+    assert_eq!(texts(&editor, cx), vec!["I love tea"]);
+    type_str(&editor, cx, "gh");
+    assert_eq!(editor.read_with(cx, |e, _| e.doc.word_count()), 0);
+}
+
+#[gpui::test]
+fn toggle_vim_switches_mode(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["x"]);
+    editor.update_in(cx, |e, window, cx| e.toggle_vim(&ToggleVim, window, cx));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.vim_mode()),
+        Some(Mode::Normal)
+    );
+    editor.update_in(cx, |e, window, cx| e.toggle_vim(&ToggleVim, window, cx));
+    assert_eq!(editor.read_with(cx, |e, _| e.vim_mode()), None);
+}

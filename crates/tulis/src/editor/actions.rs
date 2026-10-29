@@ -173,10 +173,16 @@ impl Editor {
     }
 
     pub(super) fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) {
+        if self.vim_captures_text() {
+            return self.vertical_move(1, false, cx);
+        }
         self.insert_text("\n", cx);
     }
 
     pub(super) fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        if self.vim_captures_text() {
+            return self.horizontal(false, false, cx);
+        }
         let sel = self.selection;
         if !sel.is_empty() {
             self.delete_range(sel.range(), EditKind::Other, cx);
@@ -286,5 +292,18 @@ impl Editor {
 
     pub(super) fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.is_selecting = false;
+    }
+
+    pub(super) fn on_key_down(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let keystroke = &event.keystroke;
+        if self.vim_captures_text() && keystroke.modifiers.control && keystroke.key == "r" {
+            self.vim_key(tulis_core::vim::VimKey::Ctrl('r'), window, cx);
+            cx.stop_propagation();
+        }
     }
 }

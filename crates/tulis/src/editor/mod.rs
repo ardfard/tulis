@@ -8,6 +8,7 @@ mod input;
 pub mod layout;
 #[cfg(test)]
 mod tests;
+mod vim_exec;
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -423,6 +424,8 @@ impl Render for Editor {
             .on_action(cx.listener(Self::ai_trim_paragraph))
             .on_action(cx.listener(Self::ai_trim_document))
             .on_action(cx.listener(Self::cancel))
+            .on_action(cx.listener(Self::toggle_vim))
+            .on_key_down(cx.listener(Self::on_key_down))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
