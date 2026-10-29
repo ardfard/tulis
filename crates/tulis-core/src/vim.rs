@@ -95,6 +95,31 @@ pub enum VimCommand {
         count: usize,
     },
     ToggleGhost,
+    /// `gt`: next theme preset.
+    CycleTheme,
+    /// `gm`: show or hide alternate and version markers.
+    ToggleMarkers,
+    /// `gp`: Markdown preview.
+    TogglePreview,
+    /// `g?`: cheat sheet.
+    CheatSheet,
+    /// `gl`: the Lab.
+    Lab,
+    /// `gx`: show or hide the Overflow panel.
+    ToggleOverflow,
+}
+
+/// The view command for `g` + `c`, if there is one.
+fn g_view_command(c: char) -> Option<VimCommand> {
+    Some(match c {
+        't' => VimCommand::CycleTheme,
+        'm' => VimCommand::ToggleMarkers,
+        'p' => VimCommand::TogglePreview,
+        '?' => VimCommand::CheatSheet,
+        'l' => VimCommand::Lab,
+        'x' => VimCommand::ToggleOverflow,
+        _ => return None,
+    })
 }
 
 #[derive(Debug, Default)]
@@ -302,6 +327,10 @@ impl Vim {
                 } else {
                     vec![VimCommand::ToggleGhost]
                 }
+            }
+            ('g', c) if self.op.is_none() && g_view_command(c).is_some() => {
+                self.reset();
+                g_view_command(c).into_iter().collect()
             }
             (']' | '[', 'a') if self.op.is_none() => {
                 let count = self.count();
@@ -597,5 +626,35 @@ mod tests {
                 count: 1
             }]
         );
+    }
+
+    #[test]
+    fn g_view_commands() {
+        let mut v = Vim::new();
+        assert_eq!(feed(&mut v, "gt"), vec![CycleTheme]);
+        assert_eq!(feed(&mut v, "gm"), vec![ToggleMarkers]);
+        assert_eq!(feed(&mut v, "gp"), vec![TogglePreview]);
+        assert_eq!(feed(&mut v, "g?"), vec![CheatSheet]);
+        assert_eq!(feed(&mut v, "gl"), vec![Lab]);
+        assert_eq!(feed(&mut v, "gx"), vec![ToggleOverflow]);
+        assert_eq!(v.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn g_view_commands_need_no_pending_operator_and_keep_visual_mode() {
+        let mut v = Vim::new();
+        assert_eq!(feed(&mut v, "dgt"), vec![]);
+        assert_eq!(
+            feed(&mut v, "w"),
+            vec![Move {
+                motion: WordForward,
+                count: 1
+            }]
+        );
+        feed(&mut v, "v");
+        assert_eq!(feed(&mut v, "gm"), vec![ToggleMarkers]);
+        assert_eq!(v.mode(), Mode::Visual);
+        assert_eq!(feed(&mut v, "gz"), vec![]);
+        assert_eq!(v.mode(), Mode::Visual);
     }
 }

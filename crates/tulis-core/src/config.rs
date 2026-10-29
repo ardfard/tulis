@@ -17,6 +17,10 @@ pub struct EditorConfig {
     pub vim_mode: bool,
     pub font_family: String,
     pub font_size: f32,
+    /// Theme preset name: "midnight", "paper", "sepia" or "black" (case-insensitive).
+    pub theme: String,
+    /// Sentences with more words than this are marked by the Lab's long-sentence check.
+    pub long_sentence_words: usize,
 }
 
 impl EditorConfig {
@@ -34,8 +38,10 @@ impl Default for EditorConfig {
     fn default() -> Self {
         Self {
             vim_mode: false,
-            font_family: "Iowan Old Style".into(),
+            font_family: "IBM Plex Mono".into(),
             font_size: 18.0,
+            theme: "midnight".into(),
+            long_sentence_words: 30,
         }
     }
 }
@@ -122,11 +128,21 @@ mod tests {
     }
 
     #[test]
+    fn theme_and_long_sentence_words_are_read() {
+        let c = Config::parse("[editor]\ntheme = \"Sepia\"\nlong_sentence_words = 25\n").unwrap();
+        assert_eq!(c.editor.theme, "Sepia");
+        assert_eq!(c.editor.long_sentence_words, 25);
+        assert_eq!(c.editor.font_family, "IBM Plex Mono");
+    }
+
+    #[test]
     fn defaults_match_spec() {
         let c = Config::default();
         assert!(!c.editor.vim_mode);
-        assert_eq!(c.editor.font_family, "Iowan Old Style");
+        assert_eq!(c.editor.font_family, "IBM Plex Mono");
         assert_eq!(c.editor.font_size, 18.0);
+        assert_eq!(c.editor.theme, "midnight");
+        assert_eq!(c.editor.long_sentence_words, 30);
         assert_eq!(c.ai.provider, ProviderKind::Openai);
         assert_eq!(c.ai.model, "openrouter/auto");
         assert_eq!(c.ai.api_key_env, "OPENROUTER_API_KEY");
