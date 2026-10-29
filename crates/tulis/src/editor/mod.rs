@@ -69,6 +69,8 @@ pub struct Editor {
 
 const HISTORY_LIMIT: usize = 500;
 
+pub(crate) const DISCARD_NOTICE: &str = "Other versions/alternates discarded — Ctrl+Z to restore";
+
 impl Editor {
     pub fn new(config: Config, doc: Document, cx: &mut Context<Self>) -> Self {
         let vim = config.editor.vim_mode.then(Vim::new);
@@ -315,12 +317,29 @@ impl Editor {
         let range = shift.apply_range(range);
         self.begin_edit(kind, range.start.para..range.end.para + 1);
         let start = self.doc.delete(range);
+        let discards = text.contains('\n') && self.split_discards(start);
         let end = self.doc.insert(start, text);
         self.selection = Selection::caret(end);
         if !text.is_empty() {
             self.enter_alt_edit_if_inside(end);
         }
         self.end_edit(cx);
+        if discards {
+            self.notice = Some(DISCARD_NOTICE.into());
+        }
+    }
+
+    /// Whether splitting the paragraph at `pos` drops other versions or flattens an alternate.
+    fn split_discards(&self, pos: DocPos) -> bool {
+        let p = &self.doc.paragraphs[pos.para];
+        if pos.offset == 0 || pos.offset >= p.len() {
+            return false;
+        }
+        p.versions.len() > 1
+            || p.segments()
+                .iter()
+                .zip(p.segment_ranges())
+                .any(|(seg, r)| seg.is_alt() && r.start < pos.offset && pos.offset < r.end)
     }
 
     pub(crate) fn delete_range(

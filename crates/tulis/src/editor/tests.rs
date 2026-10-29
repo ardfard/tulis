@@ -550,3 +550,44 @@ fn carriage_return_while_editing_an_alternate_splits_the_paragraph(cx: &mut Test
     });
     assert_eq!(texts(&editor, cx), vec!["x", "y"]);
 }
+
+const DISCARD_NOTICE: &str = "Other versions/alternates discarded — Ctrl+Z to restore";
+
+#[gpui::test]
+fn splitting_a_multi_version_paragraph_warns_and_undo_restores(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Draft one."]);
+    editor.update_in(cx, |e, window, cx| {
+        e.make_alternate(&MakeAlternate, window, cx)
+    });
+    select(&editor, cx, DocPos::new(0, 10), DocPos::new(0, 10));
+    editor.update_in(cx, |e, window, cx| e.newline(&Newline, window, cx));
+    assert_eq!(editor.read_with(cx, |e, _| e.notice.clone()), None);
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    select(&editor, cx, DocPos::new(0, 5), DocPos::new(0, 5));
+    editor.update_in(cx, |e, window, cx| e.newline(&Newline, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["Draft", " one."]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.notice.clone()).as_deref(),
+        Some(DISCARD_NOTICE)
+    );
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.paragraphs[0].versions.len()),
+        2
+    );
+}
+
+#[gpui::test]
+fn splitting_inside_an_alternate_warns(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    editor.update(cx, |e, _| {
+        e.doc.make_alt(0, 2..6).unwrap();
+    });
+    select(&editor, cx, DocPos::new(0, 4), DocPos::new(0, 4));
+    editor.update_in(cx, |e, window, cx| e.newline(&Newline, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["I lo", "ve tea"]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.notice.clone()).as_deref(),
+        Some(DISCARD_NOTICE)
+    );
+}
