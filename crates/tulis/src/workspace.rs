@@ -387,6 +387,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::toggle_markers))
             .on_action(cx.listener(Self::open_lab))
             .on_action(cx.listener(Self::toggle_preview))
+            .on_action(cx.listener(Self::share_x))
+            .on_action(cx.listener(Self::share_linkedin))
             .on_action(cx.listener(Self::show_cheat_sheet))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_as))
@@ -410,6 +412,7 @@ impl Render for Workspace {
                         row.child(self.render_overflow(cx))
                     }),
             )
+            .child(self.render_footer(cx))
             .child(self.render_toasts(cx))
     }
 }
@@ -453,7 +456,7 @@ impl Workspace {
         }
     }
 
-    fn save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
         if self.path.is_none() {
             self.save_as(&SaveAs, window, cx);
         } else {
@@ -507,7 +510,7 @@ impl Workspace {
         .detach();
     }
 
-    fn open(&mut self, _: &Open, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open(&mut self, _: &Open, window: &mut Window, cx: &mut Context<Self>) {
         self.confirm_discard(window, cx, |_, window, cx| {
             let answer = cx.prompt_for_paths(PathPromptOptions {
                 files: true,
@@ -851,6 +854,60 @@ mod tests {
         cx.run_until_parked();
         cx.simulate_keystrokes("escape");
         assert!(ws.read_with(cx, |ws, _| ws.preview.is_none()));
+    }
+
+    #[gpui::test]
+    fn share_copies_markdown_and_opens_the_intent_url(cx: &mut TestAppContext) {
+        init(cx);
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        ws.update_in(cx, |ws, window, cx| {
+            ws.editor.update(cx, |e, cx| {
+                e.replace_text_in_range(None, "Tea & cake\nMore", window, cx);
+                e.selection = Selection::caret(DocPos::new(0, 0));
+            });
+            ws.share(tulis_core::share::ShareTarget::X, cx);
+        });
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+            Some("Tea & cake\n\nMore")
+        );
+        assert_eq!(
+            cx.opened_url().as_deref(),
+            Some("https://x.com/intent/post?text=Tea%20%26%20cake%0A%0AMore")
+        );
+        ws.update_in(cx, |ws, window, cx| {
+            ws.editor.update(cx, |e, _| {
+                e.selection = Selection {
+                    anchor: DocPos::new(0, 0),
+                    head: DocPos::new(0, 3),
+                };
+            });
+            ws.share_linkedin(&crate::actions::ShareLinkedIn, window, cx);
+        });
+        assert_eq!(
+            cx.opened_url().as_deref(),
+            Some("https://www.linkedin.com/feed/?shareActive=true&text=Tea")
+        );
+        let notice = ws.read_with(cx, |ws, cx| {
+            ws.editor.read(cx).last_notice().map(str::to_string)
+        });
+        assert_eq!(notice.as_deref(), Some("Copied — opening the browser"));
+    }
+
+    #[gpui::test]
+    fn sharing_an_empty_document_only_toasts(cx: &mut TestAppContext) {
+        init(cx);
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        ws.update(cx, |ws, cx| ws.share(tulis_core::share::ShareTarget::X, cx));
+        assert_eq!(cx.opened_url(), None);
+        let notice = ws.read_with(cx, |ws, cx| {
+            ws.editor.read(cx).last_notice().map(str::to_string)
+        });
+        assert_eq!(notice.as_deref(), Some("Nothing to share yet"));
     }
 
     #[gpui::test]

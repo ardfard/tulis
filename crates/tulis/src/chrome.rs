@@ -3,20 +3,25 @@
 use std::time::Instant;
 
 use gpui::{
-    Animation, AnimationExt, App, ClickEvent, Context, IntoElement, ParentElement, Styled, Window,
-    div, prelude::*, px,
+    Animation, AnimationExt, App, ClickEvent, ClipboardItem, Context, IntoElement, ParentElement,
+    Styled, Window, div, prelude::*, px,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{IconName, Selectable, Sizable};
 use tulis_core::alternates::AltLevel;
+use tulis_core::share::{self, ShareTarget};
 use tulis_core::stats;
 use tulis_core::vim::Mode;
 
-use crate::actions::{ShowCheatSheet, ToggleMarkers, TogglePreview};
+use crate::actions::{
+    Open, OpenLab, Save, ShareLinkedIn, ShareX, ShowCheatSheet, ToggleMarkers, ToggleOverflowPanel,
+    TogglePreview,
+};
 use crate::toast::{TOAST_LIFETIME, toast_opacity};
 use crate::workspace::{Workspace, file_name};
 
 pub const HEADER_HEIGHT: f32 = 40.;
+pub const FOOTER_HEIGHT: f32 = 44.;
 
 pub(crate) fn mode_label(mode: Mode) -> &'static str {
     match mode {
@@ -222,5 +227,136 @@ impl Workspace {
             window.set_window_title(&title);
             self.window_title = title;
         }
+    }
+
+    /// Copy the selection (or the whole document) as Markdown and open the target's share page.
+    pub(crate) fn share(&mut self, target: ShareTarget, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, _| {
+            e.finish_alt_edit();
+        });
+        let editor = self.editor.read(cx);
+        let text = share::share_text(&editor.doc, Some(editor.selection.range()));
+        if text.trim().is_empty() {
+            self.editor
+                .update(cx, |e, cx| e.set_notice("Nothing to share yet", cx));
+            return;
+        }
+        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+        let url = share::share_url(target, &text);
+        cx.open_url(&url.url);
+        let notice = if url.trimmed {
+            "Copied — trimmed to 280 characters for X"
+        } else {
+            "Copied — opening the browser"
+        };
+        self.editor.update(cx, |e, cx| e.set_notice(notice, cx));
+    }
+
+    pub(crate) fn share_x(&mut self, _: &ShareX, _: &mut Window, cx: &mut Context<Self>) {
+        self.share(ShareTarget::X, cx);
+    }
+
+    pub(crate) fn share_linkedin(
+        &mut self,
+        _: &ShareLinkedIn,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.share(ShareTarget::LinkedIn, cx);
+    }
+
+    /// Save/Open/Share on the left, LAB in the middle, XYZ (Overflow) on the right.
+    pub(crate) fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = self.editor.read(cx).theme;
+        let overflow_open = self.show_overflow;
+        let icon_button = |id: &'static str, tooltip: &'static str| {
+            Button::new(id).ghost().xsmall().tooltip(tooltip)
+        };
+        div()
+            .id("footer")
+            .h(px(FOOTER_HEIGHT))
+            .flex_none()
+            .px_4()
+            .flex()
+            .flex_row()
+            .items_center()
+            .text_xs()
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        icon_button("save", "Save (Ctrl+S)")
+                            .icon(gpui_kit_assets::IconName::Save)
+                            .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
+                                ws.save(&Save, window, cx)
+                            })),
+                    )
+                    .child(
+                        icon_button("open", "Open (Ctrl+O)")
+                            .icon(IconName::FolderOpen)
+                            .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
+                                ws.open(&Open, window, cx)
+                            })),
+                    )
+                    .child(
+                        icon_button("share-x", "Share to X")
+                            .icon(gpui_kit_assets::IconName::Share2)
+                            .label("X")
+                            .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
+                                ws.share_x(&ShareX, window, cx)
+                            })),
+                    )
+                    .child(
+                        icon_button("share-linkedin", "Share to LinkedIn")
+                            .icon(gpui_kit_assets::IconName::Share2)
+                            .label("in")
+                            .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
+                                ws.share_linkedin(&ShareLinkedIn, window, cx)
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .id("lab")
+                    .px_3()
+                    .py_0p5()
+                    .rounded_md()
+                    .border_1()
+                    .border_dashed()
+                    .border_color(t.accent)
+                    .text_color(t.accent)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(t.panel))
+                    .child("LAB")
+                    .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
+                        ws.open_lab(&OpenLab, window, cx)
+                    })),
+            )
+            .child(
+                div().flex_1().flex().flex_row().justify_end().child(
+                    div()
+                        .id("xyz")
+                        .px_3()
+                        .py_0p5()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(if overflow_open { t.accent } else { t.rule })
+                        .text_color(if overflow_open {
+                            t.accent
+                        } else {
+                            t.text_muted
+                        })
+                        .cursor_pointer()
+                        .hover(|s| s.bg(t.panel))
+                        .child("XYZ")
+                        .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
+                            ws.toggle_overflow(&ToggleOverflowPanel, window, cx)
+                        })),
+                ),
+            )
     }
 }
