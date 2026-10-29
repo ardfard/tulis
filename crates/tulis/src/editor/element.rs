@@ -74,14 +74,15 @@ fn build_layout(
             .collect();
         let marked_here =
             marked.and_then(|(a, b)| (a.para == i && b.para == i).then(|| a.offset..b.offset));
-        let runs = build_runs(text.len(), &p.spans(), &trims, marked_here, &style);
+        let text_len = text.len();
+        let runs = build_runs(text_len, &p.spans(), &trims, marked_here, &style);
         let line = window
             .text_system()
             .shape_text(text.into(), font_size, &runs, Some(width), None)
             .ok()
             .and_then(|lines| lines.into_iter().next())
             .unwrap_or_default();
-        let para = ParaLayout::new(top, line);
+        let para = ParaLayout::new(top, line, text_len);
         top += para.height(lh) + lh * 0.6;
         paras.push(para);
     }

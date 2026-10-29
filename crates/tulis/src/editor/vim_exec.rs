@@ -80,7 +80,7 @@ impl Editor {
                 Motion::FirstNonBlank => {
                     let (start, end) = self.line_bounds(pos);
                     let text = self.doc.paragraphs[pos.para].text();
-                    let line = &text[start..end];
+                    let line = text.get(start..end).unwrap_or("");
                     DocPos::new(pos.para, start + line.len() - line.trim_start().len())
                 }
                 Motion::LineEnd => DocPos::new(pos.para, self.line_bounds(pos).1),
@@ -90,7 +90,7 @@ impl Editor {
                 Motion::ParagraphBackward => mv::prev_paragraph(&self.doc, pos),
             };
         }
-        pos
+        self.doc.clamp(pos)
     }
 
     /// Range and register text for whole paragraphs `first..=last`. For `change`, the (now empty)

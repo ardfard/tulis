@@ -14,9 +14,13 @@ const PAGE_LINES: isize = 20;
 impl Editor {
     /// The last frame's layout, if it still matches the document's paragraphs.
     pub(crate) fn current_layout(&self) -> Option<&LayoutCache> {
-        self.layout
-            .as_ref()
-            .filter(|l| l.paras.len() == self.doc.paragraphs.len())
+        self.layout.as_ref().filter(|l| {
+            l.paras.len() == self.doc.paragraphs.len()
+                && l.paras
+                    .iter()
+                    .zip(&self.doc.paragraphs)
+                    .all(|(layout, p)| layout.text_len == p.len())
+        })
     }
 
     fn extending(&self, shift_held: bool) -> bool {

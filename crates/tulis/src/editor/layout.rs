@@ -19,10 +19,12 @@ pub struct ParaLayout {
     pub line: WrappedLine,
     /// Byte offset at which each visual line starts.
     pub line_starts: Vec<usize>,
+    /// Byte length of the paragraph text this was shaped from (to detect a stale layout).
+    pub text_len: usize,
 }
 
 impl ParaLayout {
-    pub fn new(top: Pixels, line: WrappedLine) -> Self {
+    pub fn new(top: Pixels, line: WrappedLine, text_len: usize) -> Self {
         let mut line_starts = vec![0];
         for boundary in line.wrap_boundaries() {
             let run = &line.unwrapped_layout.runs[boundary.run_ix];
@@ -32,6 +34,7 @@ impl ParaLayout {
             top,
             line,
             line_starts,
+            text_len,
         }
     }
 
@@ -160,8 +163,10 @@ impl LayoutCache {
             return (0, text.len());
         };
         let k = para.visual_line_of(pos.offset);
-        let (start, mut end) = para.line_range(k);
-        end = end.min(text.len());
+        let (start, end) = para.line_range(k);
+        // A stale layout may point past the text or into a character.
+        let start = text.floor_char_boundary(start);
+        let mut end = text.floor_char_boundary(end).max(start);
         if k + 1 < para.line_count() {
             while end > start && text[..end].ends_with(char::is_whitespace) {
                 end -= text[..end].chars().next_back().map_or(1, char::len_utf8);
@@ -178,5 +183,36 @@ impl LayoutCache {
             para.visual_line_of(pos.offset),
             pos.offset.min(para.line.len()),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cache(line_starts: Vec<usize>, text_len: usize) -> LayoutCache {
+        LayoutCache {
+            origin: point(px(0.), px(0.)),
+            width: px(100.),
+            line_height: px(20.),
+            paras: vec![ParaLayout {
+                top: px(0.),
+                line: WrappedLine::default(),
+                line_starts,
+                text_len,
+            }],
+        }
+    }
+
+    #[test]
+    fn line_bounds_stay_on_char_boundaries_with_stale_offsets() {
+        let text = "héllo wörld"; // é is bytes 1..3
+        let layout = cache(vec![0, 2, 50], 40);
+        assert_eq!(layout.line_bounds(DocPos::new(0, 1), text), (0, 1));
+        assert_eq!(layout.line_bounds(DocPos::new(0, 5), text), (1, text.len()));
+        assert_eq!(
+            layout.line_bounds(DocPos::new(0, 60), text),
+            (text.len(), text.len())
+        );
     }
 }
