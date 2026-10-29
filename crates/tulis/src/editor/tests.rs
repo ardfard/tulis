@@ -487,3 +487,30 @@ fn vim_cw_on_last_word_stays_within_the_paragraph(cx: &mut TestAppContext) {
     type_str(&editor, cx, "cwx");
     assert_eq!(texts(&editor, cx), vec!["one x", "three"]);
 }
+
+/// Make "world" (6..11) an alternate and empty it with Backspace.
+fn make_alt_and_empty_it(editor: &Entity<Editor>, cx: &mut VisualTestContext, emptied: &str) {
+    select(editor, cx, DocPos::new(0, 6), DocPos::new(0, 11));
+    editor.update_in(cx, |e, window, cx| {
+        e.make_alternate(&MakeAlternate, window, cx);
+        e.backspace(&Backspace, window, cx);
+    });
+    assert_eq!(texts(editor, cx), vec![emptied]);
+}
+
+#[gpui::test]
+fn backspace_before_emptied_alternate_keeps_restored_text(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Hello world"]);
+    make_alt_and_empty_it(&editor, cx, "Hello ");
+    editor.update_in(cx, |e, window, cx| e.backspace(&Backspace, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["Helloworld"]);
+    assert_eq!(editor.read_with(cx, |e, _| e.cursor()), DocPos::new(0, 5));
+}
+
+#[gpui::test]
+fn delete_at_emptied_alternate_deletes_after_restored_text(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Hello world!"]);
+    make_alt_and_empty_it(&editor, cx, "Hello !");
+    editor.update_in(cx, |e, window, cx| e.delete(&Delete, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["Hello world"]);
+}

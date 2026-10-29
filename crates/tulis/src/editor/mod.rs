@@ -156,6 +156,22 @@ impl Shift {
             pos
         }
     }
+
+    /// Shift a range: an end at the group's start stays (it lies before the restored text), a
+    /// start there moves (a non-empty range then extends past it). An empty range is a caret.
+    pub(crate) fn apply_range(self, range: Range<DocPos>) -> Range<DocPos> {
+        if range.start == range.end {
+            let pos = self.apply(range.start);
+            return pos..pos;
+        }
+        let end_at_start = range.end.para == self.para && range.end.offset == self.start;
+        let end = if end_at_start {
+            range.end
+        } else {
+            self.apply(range.end)
+        };
+        self.apply(range.start)..end
+    }
 }
 
 impl Editor {
@@ -289,7 +305,7 @@ impl Editor {
             return;
         }
         let shift = self.finish_alt_edit();
-        let range = shift.apply(range.start)..shift.apply(range.end);
+        let range = shift.apply_range(range);
         self.begin_edit(kind, range.start.para..range.end.para + 1);
         let start = self.doc.delete(range);
         let end = self.doc.insert(start, text);
@@ -317,7 +333,7 @@ impl Editor {
             return;
         }
         let shift = self.finish_alt_edit();
-        let range = shift.apply(range.start)..shift.apply(range.end);
+        let range = shift.apply_range(range);
         self.begin_edit(kind, range.start.para..range.end.para + 1);
         let start = self.doc.delete(range);
         self.selection = Selection::caret(start);
