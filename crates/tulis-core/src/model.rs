@@ -2,14 +2,10 @@
 
 use std::ops::Range;
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ParaId(pub u64);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct OverflowId(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AiKind {
@@ -249,17 +245,10 @@ pub fn normalize_segments(segments: &mut Vec<Segment>) {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct OverflowItem {
-    pub id: OverflowId,
-    pub text: String,
-    pub created_at: DateTime<Utc>,
-    pub from_paragraph: Option<ParaId>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
     pub paragraphs: Vec<Paragraph>,
-    pub overflow: Vec<OverflowItem>,
+    /// The Overflow scratchpad's text (blocks separated by blank lines).
+    pub overflow: String,
     next_id: u64,
 }
 
@@ -277,7 +266,7 @@ impl Document {
     pub fn from_texts<S: AsRef<str>>(texts: &[S]) -> Self {
         let mut doc = Self {
             paragraphs: Vec::new(),
-            overflow: Vec::new(),
+            overflow: String::new(),
             next_id: 1,
         };
         for text in texts {
@@ -367,9 +356,6 @@ impl Document {
                 }
             }
         }
-        if self.overflow.iter().any(|o| o.id.0 >= self.next_id) {
-            return Err("an overflow item has an id not below next_id".into());
-        }
         Ok(())
     }
 }
@@ -443,17 +429,6 @@ mod tests {
             "line break",
         );
         check(&|d| d.next_id = d.paragraphs[1].id.0, "next_id");
-        check(
-            &|d| {
-                d.overflow.push(OverflowItem {
-                    id: OverflowId(d.next_id),
-                    text: "x".into(),
-                    created_at: Utc::now(),
-                    from_paragraph: None,
-                })
-            },
-            "next_id",
-        );
     }
 
     #[test]
@@ -558,7 +533,8 @@ mod tests {
 
     #[test]
     fn document_round_trips_through_json() {
-        let d = Document::from_texts(&["hello"]);
+        let mut d = Document::from_texts(&["hello"]);
+        d.overflow = "stashed\n\nlines".into();
         let json = serde_json::to_string(&d).unwrap();
         let back: Document = serde_json::from_str(&json).unwrap();
         assert_eq!(back, d);

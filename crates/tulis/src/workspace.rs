@@ -3,15 +3,15 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Entity, FocusHandle, Focusable, Hsla, MouseMoveEvent,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable, Hsla, MouseMoveEvent,
     PathPromptOptions, PromptLevel, SharedString, Subscription, Task, Window, div,
     linear_color_stop, linear_gradient, prelude::*, px,
 };
 use gpui_component::menu::ContextMenuExt;
 use gpui_component::text::TextView;
+use tulis_core::Document;
 use tulis_core::config::Config;
 use tulis_core::storage;
-use tulis_core::{Document, OverflowId};
 
 use crate::actions::{
     AiAlternates, CycleTheme, New, Open, OpenAlternates, OpenLab, Quit, Save, SaveAs,
@@ -25,7 +25,6 @@ pub struct Workspace {
     pub editor: Entity<Editor>,
     pub path: Option<PathBuf>,
     pub(crate) show_overflow: bool,
-    pub(crate) keep_in_overflow: bool,
     pub(crate) banner: Option<String>,
     pub(crate) cheat_sheet: Option<Entity<crate::cheat_sheet::CheatSheet>>,
     /// The alternates sidebar's view, created the first time it opens.
@@ -71,7 +70,6 @@ impl Workspace {
             editor,
             path: None,
             show_overflow: false,
-            keep_in_overflow: false,
             banner: None,
             cheat_sheet: None,
             alt_sidebar: None,
@@ -130,15 +128,6 @@ impl Workspace {
     }
 }
 
-fn preview(text: &str) -> String {
-    const MAX: usize = 240;
-    if text.chars().count() <= MAX {
-        text.to_string()
-    } else {
-        format!("{}…", text.chars().take(MAX).collect::<String>())
-    }
-}
-
 impl Workspace {
     pub(crate) fn toggle_markers(
         &mut self,
@@ -167,17 +156,10 @@ impl Workspace {
         cx.notify();
     }
 
-    fn insert_overflow(&mut self, id: OverflowId, window: &mut Window, cx: &mut Context<Self>) {
-        let remove = !self.keep_in_overflow;
-        self.editor
-            .update(cx, |e, cx| e.insert_overflow(id, remove, cx));
-        self.focus_editor(window, cx);
-    }
-
+    /// The Overflow panel: the scratchpad's text (read-only until the scratchpad view lands).
     fn render_overflow(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = self.editor.read(cx).theme;
-        let items = self.editor.read(cx).doc.overflow.clone();
-        let keep = self.keep_in_overflow;
+        let text = self.editor.read(cx).doc.overflow.clone();
         div()
             .w(px(280.))
             .h_full()
@@ -186,75 +168,15 @@ impl Workspace {
             .border_l_1()
             .border_color(t.rule)
             .bg(t.panel)
+            .child(div().px_3().py_2().text_sm().child("Overflow"))
             .child(
                 div()
-                    .px_3()
-                    .py_2()
-                    .flex()
-                    .justify_between()
-                    .text_sm()
-                    .child("Overflow")
-                    .child(
-                        div()
-                            .id("keep-toggle")
-                            .cursor_pointer()
-                            .text_xs()
-                            .text_color(t.text_muted)
-                            .child(if keep {
-                                "☑ keep after insert"
-                            } else {
-                                "☐ keep after insert"
-                            })
-                            .on_click(cx.listener(|ws, _: &ClickEvent, _, cx| {
-                                ws.keep_in_overflow = !ws.keep_in_overflow;
-                                cx.notify();
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .id("overflow-list")
+                    .id("overflow-text")
                     .flex_1()
                     .overflow_y_scroll()
                     .px_3()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .when(items.is_empty(), |list| {
-                        list.child(
-                            div()
-                                .text_xs()
-                                .text_color(t.text_muted)
-                                .child("Ctrl+Shift+X stashes the selection or paragraph here."),
-                        )
-                    })
-                    .children(items.into_iter().rev().map(|item| {
-                        let id = item.id;
-                        div()
-                            .id(("overflow", id.0))
-                            .p_2()
-                            .rounded_md()
-                            .bg(t.background)
-                            .cursor_pointer()
-                            .text_sm()
-                            .flex()
-                            .flex_row()
-                            .gap_2()
-                            .on_click(cx.listener(move |ws, _: &ClickEvent, window, cx| {
-                                ws.insert_overflow(id, window, cx)
-                            }))
-                            .child(div().flex_1().child(preview(&item.text)))
-                            .child(
-                                div()
-                                    .id(("overflow-remove", id.0))
-                                    .text_color(t.text_muted)
-                                    .child("×")
-                                    .on_click(cx.listener(move |ws, _: &ClickEvent, _, cx| {
-                                        cx.stop_propagation();
-                                        ws.editor.update(cx, |e, cx| e.remove_overflow(id, cx));
-                                    })),
-                            )
-                    })),
+                    .text_sm()
+                    .child(text),
             )
     }
 }
@@ -857,8 +779,8 @@ mod tests {
             })
         });
         cx.simulate_keystrokes("secondary-shift-x");
-        let stashed = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.overflow.len());
-        assert_eq!(stashed, 1);
+        let stashed = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.overflow.clone());
+        assert_eq!(stashed, "two");
     }
 
     /// A workspace in a `Root` window (tabs and inputs need it), with the page focused.

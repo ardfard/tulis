@@ -215,8 +215,6 @@ pub fn reconcile(texts: &[String], mut sidecar: Document) -> (Document, usize) {
 mod tests {
     use std::fs;
 
-    use chrono::Utc;
-
     use super::*;
     use crate::pos::DocPos;
 
@@ -225,8 +223,7 @@ mod tests {
         d.make_alt(0, 2..6).unwrap();
         d.edit_alt(0, 1, 0..4, "adore");
         d.toggle_ghost(2, 0..9).unwrap();
-        d.to_overflow(DocPos::new(1, 6)..DocPos::new(1, 16), Utc::now())
-            .unwrap();
+        assert!(d.stash(DocPos::new(1, 6)..DocPos::new(1, 16)));
         d
     }
 
@@ -301,7 +298,7 @@ mod tests {
         assert!(doc.paragraphs[0].has_metadata());
         assert_eq!(doc.paragraphs[1].text(), "Something new.");
         assert_eq!(doc.paragraphs.len(), 2);
-        assert_eq!(doc.overflow.len(), 1);
+        assert_eq!(doc.overflow, "paragraph");
         assert_eq!(
             opened.notices,
             vec!["essay.md changed outside Tulis; 1 paragraphs lost alternates/ghosts".to_string()]

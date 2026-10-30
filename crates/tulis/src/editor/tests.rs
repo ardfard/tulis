@@ -4,7 +4,6 @@ use tulis_core::{DocPos, Document, Selection};
 
 use super::{AltEdit, Editor, TrimSuggestion};
 use crate::actions::*;
-use tulis_core::OverflowId;
 
 pub(crate) fn editor_with<'a>(
     cx: &'a mut TestAppContext,
@@ -247,16 +246,20 @@ fn ghost_toggle_on_paragraph_and_selection(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn overflow_round_trip(cx: &mut TestAppContext) {
+fn stashing_the_paragraph_appends_it_and_undo_takes_it_back(cx: &mut TestAppContext) {
     let (editor, cx) = editor_with(cx, &["a", "b"]);
+    editor.update(cx, |e, _| e.doc.overflow = "older".into());
     editor.update_in(cx, |e, window, cx| {
         e.send_to_overflow(&SendToOverflow, window, cx)
     });
     assert_eq!(texts(&editor, cx), vec!["b"]);
-    let id: OverflowId = editor.read_with(cx, |e, _| e.doc.overflow[0].id);
-    editor.update(cx, |e, cx| e.insert_overflow(id, true, cx));
-    assert_eq!(texts(&editor, cx), vec!["ab"]);
-    assert!(editor.read_with(cx, |e, _| e.doc.overflow.is_empty()));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.overflow.clone()),
+        "older\n\na"
+    );
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["a", "b"]);
+    assert_eq!(editor.read_with(cx, |e, _| e.doc.overflow.clone()), "older");
 }
 
 #[gpui::test]
@@ -746,7 +749,7 @@ fn vim_visual_gs_stashes_the_selection_and_returns_to_normal(cx: &mut TestAppCon
     type_str(&editor, cx, "v$gs");
     assert_eq!(texts(&editor, cx), vec!["Keep this. "]);
     assert_eq!(
-        editor.read_with(cx, |e, _| e.doc.overflow[0].text.clone()),
+        editor.read_with(cx, |e, _| e.doc.overflow.clone()),
         "Stash that."
     );
     assert_eq!(
@@ -1150,10 +1153,7 @@ fn context_menu_commands_act_on_the_word_and_the_ghost_label_follows(cx: &mut Te
         e.send_to_overflow(&SendToOverflow, window, cx)
     });
     assert_eq!(texts(&editor, cx), vec!["I  verdant tea"]);
-    assert_eq!(
-        editor.read_with(cx, |e, _| e.doc.overflow[0].text.clone()),
-        "love"
-    );
+    assert_eq!(editor.read_with(cx, |e, _| e.doc.overflow.clone()), "love");
 }
 
 #[gpui::test]
@@ -1396,7 +1396,7 @@ fn visual_line_g_commands_act_on_whole_paragraphs(cx: &mut TestAppContext) {
     editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(1, 3)));
     type_str(&editor, cx, "Vgs");
     assert_eq!(
-        editor.read_with(cx, |e, _| e.doc.overflow[0].text.clone()),
+        editor.read_with(cx, |e, _| e.doc.overflow.clone()),
         "Stash this paragraph."
     );
     assert_eq!(

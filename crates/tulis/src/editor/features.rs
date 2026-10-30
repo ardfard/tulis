@@ -6,7 +6,7 @@ use std::time::Instant;
 use gpui::{Context, Window};
 use tulis_core::alternates::{AltLevel, OpError};
 use tulis_core::history::EditKind;
-use tulis_core::{DocPos, OverflowId, Selection};
+use tulis_core::{DocPos, Selection};
 
 use super::{AltEdit, CycledGroup, Editor, TrimSuggestion};
 use crate::actions::*;
@@ -180,34 +180,14 @@ impl Editor {
             return self.set_notice("Nothing to move to overflow", cx);
         }
         self.begin_edit(EditKind::Other, sel.start.para..sel.end.para + 1);
-        let now = chrono::Utc::now();
-        if whole {
-            self.doc.paragraph_to_overflow(sel.start.para, now);
+        self.doc.stash(sel.clone());
+        self.selection = if whole {
             let para = sel.start.para.min(self.doc.paragraphs.len() - 1);
-            self.selection = Selection::caret(DocPos::new(para, 0));
+            Selection::caret(DocPos::new(para, 0))
         } else {
-            self.doc.to_overflow(sel.clone(), now);
-            self.selection = Selection::caret(sel.start);
-        }
+            Selection::caret(sel.start)
+        };
         self.end_edit(cx);
-    }
-
-    pub fn insert_overflow(&mut self, id: OverflowId, remove: bool, cx: &mut Context<Self>) {
-        self.finish_alt_edit();
-        let sel = self.selection.range();
-        self.begin_edit(EditKind::Other, sel.start.para..sel.end.para + 1);
-        let start = self.doc.delete(sel);
-        if let Some(end) = self.doc.insert_overflow(id, start, remove) {
-            self.selection = Selection::caret(end);
-        }
-        self.end_edit(cx);
-    }
-
-    pub fn remove_overflow(&mut self, id: OverflowId, cx: &mut Context<Self>) {
-        self.begin_edit(EditKind::Other, 0..0);
-        if self.doc.remove_overflow(id) {
-            self.end_edit(cx);
-        }
     }
 
     /// Accept the trim suggestion under the cursor (or the next one, or the first) by ghosting it.

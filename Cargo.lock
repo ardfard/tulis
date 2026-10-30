@@ -6736,7 +6736,6 @@ dependencies = [
 name = "tulis"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "gpui-component",
  "gpui-kit-assets",
  "gpui-pre",
@@ -6750,7 +6749,6 @@ dependencies = [
 name = "tulis-core"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "dirs 7.0.0",
  "hex",
  "serde",

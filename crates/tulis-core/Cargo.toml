@@ -5,7 +5,6 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
-chrono = { version = "0.4.45", features = ["serde"] }
 dirs = "7.0.0"
 hex = "0.4.3"
 serde = { version = "1.0.229", features = ["derive"] }
