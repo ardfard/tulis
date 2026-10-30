@@ -35,7 +35,7 @@ use tulis_core::{DocPos, Document, ParaId, Selection};
 pub use alt_session::{AltSession, Scope};
 use element::EditorElement;
 pub(crate) use element::GUTTER;
-pub use lab::{TrimLevel, TrimPreview};
+pub use lab::{Check, Mark, TrimLevel, TrimPreview};
 use layout::LayoutCache;
 
 use crate::theme::{self, Theme};
@@ -93,6 +93,8 @@ pub struct Editor {
     pub toasts: ToastQueue,
     /// The Lab's trim preview, if one is showing.
     pub trim_preview: Option<TrimPreview>,
+    /// The Lab's guide-check marks, in document order.
+    pub marks: Vec<Mark>,
     /// Located cuts by level, paragraph and the text sent, with the rendered text they index.
     pub(crate) trim_cache: HashMap<lab::TrimKey, (String, Vec<Range<usize>>)>,
     pub vim: Option<Vim>,
@@ -149,6 +151,7 @@ impl Editor {
             dirty: false,
             toasts: ToastQueue::default(),
             trim_preview: None,
+            marks: Vec::new(),
             trim_cache: HashMap::new(),
             vim,
             alt_edit: None,
@@ -187,6 +190,7 @@ impl Editor {
         self.history = History::new(HISTORY_LIMIT);
         self.overflow_changed(false);
         self.trim_preview = None;
+        self.marks.clear();
         self.trim_cache.clear();
         self.alt_edit = None;
         self.cycled = None;
@@ -351,6 +355,7 @@ impl Editor {
         if let Some(preview) = &mut self.trim_preview {
             preview.retain(|cut| !ids.contains(&cut.para_id));
         }
+        self.marks.retain(|m| !ids.contains(&m.para_id));
     }
 
     pub(crate) fn end_edit(&mut self, cx: &mut Context<Self>) {
@@ -614,6 +619,7 @@ impl Editor {
             head: self.doc.clamp(self.selection.head),
         };
         self.trim_preview = None;
+        self.marks.clear();
         self.marked = None;
         self.goal_x = None;
         self.dirty = true;

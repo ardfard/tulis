@@ -77,6 +77,15 @@ impl Editor {
             Ok(target) => target,
             Err(e) => return self.set_notice(e.to_string(), cx),
         };
+        // Inside a Lab mark, the mark is the target.
+        let head = self.selection.head;
+        if self.selection.is_empty()
+            && let Some(ix) = self.mark_at(head)
+        {
+            let range = self.marks[ix].range.clone();
+            self.retarget_alt_session_to(head.para, range.clone(), false, cx);
+            return self.request_ai_alternates(head.para, range, false, cx);
+        }
         let whole_paragraph = self.selection.is_empty();
         self.retarget_alt_session_to(para, range.clone(), whole_paragraph, cx);
         self.request_ai_alternates(para, range, whole_paragraph, cx);

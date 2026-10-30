@@ -1,5 +1,5 @@
-//! The Lab on the page: trim previews, the runner every Lab request goes through, and its
-//! cancel flag.
+//! The Lab on the page: trim previews, guide-check marks, the runner every Lab request goes
+//! through, and its cancel flag.
 
 use std::collections::HashSet;
 use std::ops::Range;
@@ -7,8 +7,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::{Context, Window, prelude::*};
+use tulis_core::ai::prompts::MarkKind;
 use tulis_core::ai::{AiError, CompletionRequest, prompts};
 use tulis_core::history::EditKind;
+use tulis_core::sentence;
 use tulis_core::stats;
 use tulis_core::{DocPos, ParaId, Selection};
 
@@ -55,6 +57,82 @@ impl TrimLevel {
         }
     }
 }
+
+/// A guide check: it marks passages (or, for typos, proposes fixes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Check {
+    Weakest,
+    Long,
+    Convoluted,
+    Tone,
+    Hedges,
+}
+
+impl Check {
+    /// In the order the Lab lists them.
+    pub const ALL: [Check; 5] = [
+        Check::Weakest,
+        Check::Long,
+        Check::Convoluted,
+        Check::Tone,
+        Check::Hedges,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Check::Weakest => "Mark the weakest sentences",
+            Check::Long => "Mark sentences that run long",
+            Check::Convoluted => "Mark convoluted sentences",
+            Check::Tone => "Mark words that don't fit the tone",
+            Check::Hedges => "Mark hedges and filler",
+        }
+    }
+
+    /// What the bar calls its marks.
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Check::Weakest => "weakest sentences",
+            Check::Long => "long sentences",
+            Check::Convoluted => "convoluted sentences",
+            Check::Tone => "off-tone words",
+            Check::Hedges => "hedges and filler",
+        }
+    }
+
+    /// The one-line description "what each idea does" shows.
+    pub fn description(self) -> &'static str {
+        match self {
+            Check::Weakest => "AI marks the sentences that do the least work.",
+            Check::Long => "Marks sentences over your word limit (long_sentence_words). No AI.",
+            Check::Convoluted => "AI marks sentences that are hard to follow.",
+            Check::Tone => "AI marks words that don't match the rest of the document.",
+            Check::Hedges => "AI marks padding: I think, maybe, really, in order to…",
+        }
+    }
+
+    fn mark_kind(self) -> Option<MarkKind> {
+        match self {
+            Check::Weakest => Some(MarkKind::Weakest),
+            Check::Convoluted => Some(MarkKind::Convoluted),
+            Check::Tone => Some(MarkKind::Tone),
+            Check::Hedges => Some(MarkKind::Hedges),
+            Check::Long => None,
+        }
+    }
+}
+
+/// A passage a check marked. View state, like the trim preview: editing its paragraph drops it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mark {
+    pub para_id: ParaId,
+    /// A byte range of the paragraph's rendered text.
+    pub range: Range<usize>,
+    pub check: Check,
+    pub note: String,
+}
+
+/// How much of the document the tone check sends along.
+const TONE_EXCERPT_CHARS: usize = 1500;
 
 /// A passage a trim would cut: a byte range of its paragraph's rendered text.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -149,6 +227,7 @@ pub enum BarAction {
     MakeCuts,
     Walk,
     Done,
+    Clear,
 }
 
 impl BarAction {
@@ -157,6 +236,7 @@ impl BarAction {
             BarAction::MakeCuts => "Make the cuts",
             BarAction::Walk => "Walk through",
             BarAction::Done => "Done",
+            BarAction::Clear => "Clear",
         }
     }
 
@@ -166,6 +246,7 @@ impl BarAction {
             BarAction::MakeCuts => "make-cuts",
             BarAction::Walk => "walk",
             BarAction::Done => "done",
+            BarAction::Clear => "clear",
         }
     }
 }
@@ -396,13 +477,27 @@ impl Editor {
         } else {
             let cuts = cuts.into_iter().map(|(_, cut)| cut).collect();
             self.trim_preview = Some(TrimPreview::new(level, cuts));
+            self.marks.clear();
         }
         cx.notify();
     }
 
     /// The bar's text and buttons, if the Lab has something showing.
     pub fn lab_bar(&self) -> Option<LabBar> {
-        let preview = self.trim_preview.as_ref()?;
+        let Some(preview) = self.trim_preview.as_ref() else {
+            let first = self.marks.first()?;
+            let head = self.selection.head;
+            let note = self.mark_at(head).map(|ix| self.marks[ix].note.clone());
+            return Some(LabBar {
+                title: format!(
+                    "{} marked · {}",
+                    self.marks.len(),
+                    first.check.short_label()
+                ),
+                hint: note.filter(|note| !note.is_empty()),
+                actions: vec![BarAction::Clear],
+            });
+        };
         if let Some(walk) = preview.walk {
             let decided = walk.cut + walk.kept;
             let left = (walk.at..preview.cuts.len())
@@ -439,6 +534,11 @@ impl Editor {
             BarAction::Done => {
                 self.stop_ai();
                 self.trim_preview = None;
+                cx.notify();
+            }
+            BarAction::Clear => {
+                self.stop_ai();
+                self.marks.clear();
                 cx.notify();
             }
         }
@@ -598,10 +698,153 @@ impl Editor {
         true
     }
 
-    /// The active cuts of the trim preview, as `(paragraph, range)` in document order.
+    /// The mark under `pos` (edges included), as an index into `marks`.
+    pub(crate) fn mark_at(&self, pos: DocPos) -> Option<usize> {
+        let id = self.doc.paragraphs.get(pos.para)?.id;
+        self.marks.iter().position(|m| {
+            m.para_id == id && m.range.start <= pos.offset && pos.offset <= m.range.end
+        })
+    }
+
+    /// The marks in paragraph `id` (drawn tinted).
+    pub(crate) fn mark_ranges(&self, id: ParaId) -> Vec<Range<usize>> {
+        self.marks
+            .iter()
+            .filter(|m| m.para_id == id)
+            .map(|m| m.range.clone())
+            .collect()
+    }
+
+    /// Run `check` over the paragraphs in `scope`. The long-sentence check is local; the others
+    /// send one request per non-empty paragraph. The marks replace any marks or trim preview.
+    pub fn run_check(&mut self, check: Check, scope: &[ParaId], cx: &mut Context<Self>) {
+        self.finish_alt_edit();
+        let paras: Vec<usize> = scope
+            .iter()
+            .filter_map(|id| self.doc.para_index(*id))
+            .filter(|&para| !self.doc.paragraphs[para].export_text().trim().is_empty())
+            .collect();
+        if paras.is_empty() {
+            return self.set_notice("Nothing to check", cx);
+        }
+        let Some(kind) = check.mark_kind() else {
+            let max = self.config.editor.long_sentence_words;
+            let mut marks = Vec::new();
+            for para in paras {
+                let p = &self.doc.paragraphs[para];
+                for (range, words) in sentence::long_sentences(&p.text(), max) {
+                    marks.push(Mark {
+                        para_id: p.id,
+                        range,
+                        check,
+                        note: format!("{words} words"),
+                    });
+                }
+            }
+            return self.show_marks(marks, cx);
+        };
+        let context = (kind == MarkKind::Tone).then(|| self.document_excerpt());
+        let jobs = paras
+            .into_iter()
+            .map(|para| {
+                let p = &self.doc.paragraphs[para];
+                let export = p.export_text();
+                LabJob {
+                    para_id: p.id,
+                    text: p.text(),
+                    request: prompts::mark_request(kind, &export, context.as_deref()),
+                    export,
+                }
+            })
+            .collect();
+        self.run_lab(
+            jobs,
+            "AI is reading…",
+            move |editor, results, total, cx| editor.apply_mark_results(check, results, total, cx),
+            cx,
+        );
+    }
+
+    /// The start of the document's export text, for the tone check.
+    fn document_excerpt(&self) -> String {
+        let text = self
+            .doc
+            .paragraphs
+            .iter()
+            .map(|p| p.export_text())
+            .filter(|t| !t.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        text.chars().take(TONE_EXCERPT_CHARS).collect()
+    }
+
+    fn apply_mark_results(
+        &mut self,
+        check: Check,
+        results: LabResults,
+        total: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let mut failed = 0;
+        let mut first_error = None;
+        let mut marks = Vec::new();
+        for (job, result) in results {
+            let response = match result {
+                Ok(response) => response,
+                Err(e) => {
+                    failed += 1;
+                    first_error.get_or_insert(e.to_string());
+                    continue;
+                }
+            };
+            let Some(para) = self.doc.para_index(job.para_id) else {
+                continue;
+            };
+            let p = &self.doc.paragraphs[para];
+            if p.text() != job.text {
+                continue;
+            }
+            let hits = prompts::parse_marks(&response);
+            marks.extend(
+                prompts::locate_marks(&hits, p)
+                    .into_iter()
+                    .map(|(range, note)| Mark {
+                        para_id: job.para_id,
+                        range,
+                        check,
+                        note,
+                    }),
+            );
+        }
+        if failed < total {
+            self.show_marks(marks, cx);
+        }
+        if let Some(notice) = failure_notice(failed, total, first_error) {
+            self.set_notice(notice, cx);
+        }
+    }
+
+    /// Show `marks` (in document order) in place of any marks or trim preview.
+    fn show_marks(&mut self, mut marks: Vec<Mark>, cx: &mut Context<Self>) {
+        let order = |m: &Mark| (self.doc.para_index(m.para_id), m.range.start);
+        marks.sort_by_key(order);
+        if marks.is_empty() {
+            self.set_notice("Nothing marked", cx);
+        }
+        self.marks = marks;
+        self.trim_preview = None;
+        cx.notify();
+    }
+
+    /// The active cuts of the trim preview, or else the marks, as `(paragraph, range)` in
+    /// document order.
     fn lab_items(&self) -> Vec<(usize, Range<usize>)> {
         let Some(preview) = &self.trim_preview else {
-            return Vec::new();
+            return self
+                .marks
+                .iter()
+                .filter_map(|m| Some((self.doc.para_index(m.para_id)?, m.range.clone())))
+                .collect();
         };
         preview
             .cuts
@@ -612,7 +855,7 @@ impl Editor {
             .collect()
     }
 
-    /// Tab, `]m`, `[m`: put the cursor at the start of the next (or previous) active cut,
+    /// Tab, `]m`, `[m`: put the cursor at the start of the next (or previous) active cut or mark,
     /// `count` times, wrapping around.
     pub(crate) fn jump_lab_item(&mut self, forward: bool, count: usize, cx: &mut Context<Self>) {
         let items = self.lab_items();

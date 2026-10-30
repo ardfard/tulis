@@ -78,6 +78,7 @@ fn build_layout(
             title_font: title_font.clone(),
             color: faded(editor.theme.text, alpha),
             fade_alpha: editor.theme.fade_alpha,
+            mark_tint: editor.theme.mark_tint,
             marker: faded(editor.theme.text_muted, 0.5 * alpha),
             ghost_alpha: editor.theme.ghost_alpha,
         }
@@ -111,6 +112,7 @@ fn build_layout(
             text_len,
             &p.spans(),
             &cuts,
+            &editor.mark_ranges(p.id),
             marked_here,
             title_marker,
             caret_on_marker,

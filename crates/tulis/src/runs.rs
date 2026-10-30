@@ -1,4 +1,4 @@
-//! Turn a paragraph's spans, a trim preview's cuts, IME marked range and `# ` title marker into
+//! Turn a paragraph's spans, a trim preview's cuts, Lab marks, IME marked range and `# ` title marker into
 //! GPUI text runs.
 
 use std::ops::Range;
@@ -16,12 +16,16 @@ pub struct RunStyle {
     pub ghost_alpha: f32,
     /// Alpha factor of a trim preview's active cuts.
     pub fade_alpha: f32,
+    /// Background of Lab marks.
+    pub mark_tint: Hsla,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_runs(
     text_len: usize,
     spans: &[Span],
     faded: &[Range<usize>],
+    tinted: &[Range<usize>],
     marked: Option<Range<usize>>,
     title_marker: usize,
     caret_on_marker: bool,
@@ -32,7 +36,7 @@ pub fn build_runs(
     for span in spans {
         cuts.extend([span.range.start, span.range.end]);
     }
-    for range in faded.iter().chain(marked.iter()) {
+    for range in faded.iter().chain(tinted).chain(marked.iter()) {
         cuts.extend([range.start.min(text_len), range.end.min(text_len)]);
     }
     cuts.sort_unstable();
@@ -47,6 +51,7 @@ pub fn build_runs(
             let ghost = span.is_some_and(|s| s.ghost);
             let in_marked = marked.as_ref().is_some_and(|m| m.start <= a && b <= m.end);
             let fade = faded.iter().any(|t| t.start <= a && b <= t.end);
+            let tint = tinted.iter().any(|t| t.start <= a && b <= t.end);
             let mut color = style.color;
             if ghost {
                 color.a *= style.ghost_alpha;
@@ -77,7 +82,7 @@ pub fn build_runs(
                     style.font.clone()
                 },
                 color,
-                background_color: None,
+                background_color: tint.then_some(style.mark_tint),
                 underline,
                 strikethrough: None,
             }
@@ -102,6 +107,7 @@ mod tests {
             fade_alpha: 0.35,
             marker: hsla(0., 0., 0.5, 0.5),
             ghost_alpha: 0.1,
+            mark_tint: hsla(0.14, 0.9, 0.6, 0.3),
         }
     }
 
@@ -124,7 +130,7 @@ mod tests {
                 alt: None,
             },
         ];
-        let runs = build_runs(10, &spans, &[7..9], None, 0, false, &style());
+        let runs = build_runs(10, &spans, &[7..9], &[], None, 0, false, &style());
         assert_eq!(
             runs.iter().map(|r| r.len).collect::<Vec<_>>(),
             vec![2, 4, 1, 2, 1]
@@ -144,12 +150,12 @@ mod tests {
             ghost: false,
             alt: None,
         }];
-        let runs = build_runs(7, &spans, &[], None, 2, false, &style());
+        let runs = build_runs(7, &spans, &[], &[], None, 2, false, &style());
         assert_eq!(runs.iter().map(|r| r.len).collect::<Vec<_>>(), vec![2, 5]);
         assert_eq!(runs[0].color.a, 0.);
         assert_eq!(runs[1].color.a, 1.);
         assert!(runs.iter().all(|r| r.font.weight == FontWeight::BOLD));
-        let plain = build_runs(7, &spans, &[], None, 0, false, &style());
+        let plain = build_runs(7, &spans, &[], &[], None, 0, false, &style());
         assert!(plain.iter().all(|r| r.font.weight != FontWeight::BOLD));
     }
 
@@ -160,9 +166,9 @@ mod tests {
             ghost: false,
             alt: None,
         }];
-        let hidden = build_runs(7, &spans, &[], None, 2, false, &style());
+        let hidden = build_runs(7, &spans, &[], &[], None, 2, false, &style());
         assert_eq!(hidden[0].color.a, 0.);
-        let shown = build_runs(7, &spans, &[], None, 2, true, &style());
+        let shown = build_runs(7, &spans, &[], &[], None, 2, true, &style());
         assert_eq!(shown[0].color, style().marker);
         assert!(shown[0].color.a > 0.);
         // The title text itself is untouched.
@@ -176,7 +182,7 @@ mod tests {
             ghost: false,
             alt: None,
         }];
-        let runs = build_runs(5, &spans, &[], Some(1..3), 0, false, &style());
+        let runs = build_runs(5, &spans, &[], &[], Some(1..3), 0, false, &style());
         assert_eq!(
             runs.iter().map(|r| r.len).collect::<Vec<_>>(),
             vec![1, 2, 2]
@@ -186,7 +192,26 @@ mod tests {
     }
 
     #[test]
+    fn marks_get_a_tinted_background() {
+        let spans = vec![Span {
+            range: 0..6,
+            ghost: false,
+            alt: None,
+        }];
+        let runs = build_runs(6, &spans, &[], &[2..4, 5..6], None, 0, false, &style());
+        assert_eq!(
+            runs.iter().map(|r| r.len).collect::<Vec<_>>(),
+            vec![2, 2, 1, 1]
+        );
+        assert_eq!(runs[1].background_color, Some(style().mark_tint));
+        assert_eq!(runs[3].background_color, Some(style().mark_tint));
+        assert_eq!(runs[0].background_color, None);
+        assert_eq!(runs[2].background_color, None);
+        assert_eq!(runs[1].color, style().color);
+    }
+
+    #[test]
     fn empty_text_has_no_runs() {
-        assert!(build_runs(0, &[], &[], None, 0, false, &style()).is_empty());
+        assert!(build_runs(0, &[], &[], &[], None, 0, false, &style()).is_empty());
     }
 }

@@ -9,20 +9,26 @@ use gpui_component::Selectable;
 use tulis_core::ParaId;
 
 use crate::actions::{LabChoose, LabNext, LabPrev};
-use crate::editor::{Editor, TrimLevel};
+use crate::editor::{Check, Editor, TrimLevel};
 
 pub const LAB_WIDTH: f32 = 340.;
 
 /// Something the Lab can run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LabItem {
+    Check(Check),
     Trim(TrimLevel),
 }
 
 impl LabItem {
-    /// In the order the popover lists them (and the arrow keys walk them).
+    /// In the order the popover lists them (and the arrow keys walk them): the checks, then
+    /// the trim levels.
     pub fn all() -> Vec<LabItem> {
-        TrimLevel::ALL.into_iter().map(LabItem::Trim).collect()
+        Check::ALL
+            .into_iter()
+            .map(LabItem::Check)
+            .chain(TrimLevel::ALL.into_iter().map(LabItem::Trim))
+            .collect()
     }
 }
 
@@ -38,6 +44,8 @@ pub struct LabPanel {
     pub(crate) scope: Vec<ParaId>,
     /// Index into `LabItem::all()`.
     pub(crate) highlight: usize,
+    /// "what each idea does" is expanded.
+    pub(crate) explain: bool,
     _subscription: Subscription,
 }
 
@@ -51,6 +59,7 @@ impl LabPanel {
             focus: cx.focus_handle(),
             scope: Vec::new(),
             highlight: 0,
+            explain: false,
         }
     }
 
@@ -90,6 +99,7 @@ impl LabPanel {
     pub(crate) fn run(&mut self, item: LabItem, cx: &mut Context<Self>) {
         let scope = self.scope.clone();
         self.editor.update(cx, |e, cx| match item {
+            LabItem::Check(check) => e.run_check(check, &scope, cx),
             LabItem::Trim(level) => e.run_trim(level, &scope, cx),
         });
         if !self.editor.read(cx).lab_running() {
@@ -104,11 +114,22 @@ impl Render for LabPanel {
         let t = editor.theme;
         let running = editor.lab_running();
         let highlight = self.highlight;
+        let explain = self.explain;
         let items = LabItem::all();
-        let trims = items.iter().enumerate().map(|(ix, item)| {
-            let LabItem::Trim(level) = item;
-            (ix, *level)
-        });
+        let checks = items
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, item)| match item {
+                LabItem::Check(check) => Some((ix, *check)),
+                LabItem::Trim(_) => None,
+            });
+        let trims = items
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, item)| match item {
+                LabItem::Trim(level) => Some((ix, *level)),
+                LabItem::Check(_) => None,
+            });
         div()
             .id("lab-panel")
             .debug_selector(|| "lab-panel".into())
@@ -123,7 +144,58 @@ impl Render for LabPanel {
             .gap_2()
             .text_sm()
             .text_color(t.text)
-            .child(div().italic().text_color(t.accent).child("The Lab guide…"))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_baseline()
+                    .child(
+                        div()
+                            .flex_1()
+                            .italic()
+                            .text_color(t.accent)
+                            .child("The Lab guide…"),
+                    )
+                    .child(
+                        div()
+                            .id("lab-explain")
+                            .debug_selector(|| "lab-explain".into())
+                            .text_xs()
+                            .text_color(t.text_muted)
+                            .underline()
+                            .cursor_pointer()
+                            .child("what each idea does")
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.explain = !this.explain;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(div().flex().flex_col().children(checks.map(|(ix, check)| {
+                div()
+                    .id(("lab-check", ix))
+                    .debug_selector(move || format!("lab-check-{ix}"))
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .when(ix == highlight, |d| d.bg(t.selection))
+                    .hover(|d| d.bg(t.selection))
+                    .child(check.label())
+                    .when(explain, |d| {
+                        d.child(
+                            div()
+                                .debug_selector(move || format!("lab-desc-{ix}"))
+                                .text_xs()
+                                .text_color(t.text_muted)
+                                .child(check.description()),
+                        )
+                    })
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.highlight = ix;
+                        this.run(LabItem::Check(check), cx);
+                    }))
+            })))
             .child(
                 div()
                     .flex()

@@ -1329,9 +1329,14 @@ mod tests {
         let mock = lab_mock(&ws, cx, &[r#"["really "]"#]);
         cx.simulate_keystrokes("secondary-l");
         draw(cx);
+        // Past the checks to the trim buttons.
+        let checks = crate::editor::Check::ALL.len();
+        for _ in 0..checks {
+            cx.simulate_keystrokes("j");
+        }
         cx.simulate_keystrokes("j j down k up right");
         let highlight = ws.read_with(cx, |ws, cx| ws.lab.read(cx).highlight);
-        assert_eq!(highlight, 2);
+        assert_eq!(highlight, checks + 2);
         cx.simulate_keystrokes("left enter");
         draw(cx);
         assert_eq!(mock.requests.lock().unwrap().len(), 1);
@@ -1362,6 +1367,9 @@ mod tests {
         cx.simulate_keystrokes("secondary-shift-t");
         draw(cx);
         assert_eq!(lab_scope(&ws, cx), vec![1]);
+        for _ in 0..crate::editor::Check::ALL.len() {
+            cx.simulate_keystrokes("j");
+        }
         cx.simulate_keystrokes("down enter");
         draw(cx);
         let requests = mock.requests.lock().unwrap().clone();
@@ -1427,6 +1435,30 @@ mod tests {
         let export = editor.read_with(cx, |e, _| e.doc.paragraphs[0].export_text());
         assert_eq!(export, "I love tea.");
         assert!(page_focused(&ws, cx));
+    }
+
+    #[gpui::test]
+    fn the_lab_lists_checks_then_trims_and_explains_the_checks(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["Short. This sentence runs on and on and on."]);
+        ws.update(cx, |ws, cx| {
+            ws.editor
+                .update(cx, |e, _| e.config.editor.long_sentence_words = 4)
+        });
+        cx.simulate_keystrokes("secondary-l");
+        draw(cx);
+        assert!(cx.debug_bounds("lab-check-0").is_some());
+        assert!(cx.debug_bounds("lab-desc-0").is_none());
+        let link = cx.debug_bounds("lab-explain").expect("the explain link");
+        cx.simulate_click(link.center(), gpui::Modifiers::none());
+        draw(cx);
+        assert!(cx.debug_bounds("lab-desc-0").is_some());
+        // The second row is the long-sentence check; it runs locally and closes the Lab.
+        cx.simulate_keystrokes("j enter");
+        draw(cx);
+        assert!(!lab_open(&ws, cx));
+        let marks = ws.read_with(cx, |ws, cx| ws.editor.read(cx).marks.len());
+        assert_eq!(marks, 1);
+        assert!(cx.debug_bounds("lab-bar").is_some());
     }
 
     #[gpui::test]

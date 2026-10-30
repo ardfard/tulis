@@ -8,7 +8,7 @@ use tulis_core::ai::{AiError, CompletionRequest, LlmProvider, MockProvider};
 use tulis_core::vim::Vim;
 use tulis_core::{DocPos, ParaId, Selection};
 
-use super::lab::{BarAction, TrimSuggestion};
+use super::lab::{BarAction, Check, TrimSuggestion};
 use super::tests::{editor_with, texts, type_str};
 use super::{Editor, TrimLevel, TrimPreview};
 use crate::actions::*;
@@ -426,4 +426,161 @@ fn escape_stops_the_walk_and_leaves_the_rest_of_the_preview(cx: &mut TestAppCont
     editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 0)));
     type_str(&editor, cx, "n");
     assert_eq!(texts(&editor, cx), vec!["nI really love tea, truly."]);
+}
+
+fn marks(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Vec<(usize, String, String)> {
+    editor.read_with(cx, |e, _| {
+        e.marks
+            .iter()
+            .map(|m| {
+                let para = e.doc.para_index(m.para_id).unwrap();
+                let text = e.doc.paragraphs[para].text()[m.range.clone()].to_string();
+                (para, text, m.note.clone())
+            })
+            .collect()
+    })
+}
+
+#[gpui::test]
+fn the_long_sentence_check_marks_locally(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(
+        cx,
+        &[
+            "Short one. This one has more than five words in it.",
+            "Tiny.",
+        ],
+    );
+    let mock = mock(&editor, cx, &[]);
+    editor.update(cx, |e, _| e.config.editor.long_sentence_words = 5);
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Long, &all, cx));
+    assert!(mock.requests.lock().unwrap().is_empty());
+    assert!(!editor.read_with(cx, |e, _| e.lab_running()));
+    assert_eq!(
+        marks(&editor, cx),
+        vec![(
+            0,
+            "This one has more than five words in it.".to_string(),
+            "9 words".to_string()
+        )]
+    );
+    let bar = editor.read_with(cx, |e, _| e.lab_bar()).unwrap();
+    assert_eq!(bar.title, "1 marked · long sentences");
+    assert_eq!(bar.actions, vec![BarAction::Clear]);
+    // Clear removes the marks.
+    editor.update(cx, |e, cx| e.bar_action(BarAction::Clear, cx));
+    assert!(marks(&editor, cx).is_empty());
+    assert!(editor.read_with(cx, |e, _| e.lab_bar()).is_none());
+}
+
+#[gpui::test]
+fn ai_mark_checks_locate_exact_text_and_drop_invented_text(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I think it is fine.", "", "Maybe so, really."]);
+    let mock = mock(
+        &editor,
+        cx,
+        &[
+            r#"[{"text": "I think", "note": "hedge"}]"#,
+            r#"[{"text": "really", "note": "filler"}, {"text": "perhaps", "note": "invented"}]"#,
+        ],
+    );
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Hedges, &all, cx));
+    cx.run_until_parked();
+    let requests = mock.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].system.contains("hedges"));
+    assert_eq!(
+        marks(&editor, cx),
+        vec![
+            (0, "I think".to_string(), "hedge".to_string()),
+            (2, "really".to_string(), "filler".to_string()),
+        ]
+    );
+    assert_eq!(
+        bar_title(&editor, cx).as_deref(),
+        Some("2 marked · hedges and filler")
+    );
+    // The tone check sends an excerpt of the whole document along.
+    let mock = self::mock(&editor, cx, &["[]"]);
+    editor.update(cx, |e, cx| e.run_check(Check::Tone, &all[2..], cx));
+    cx.run_until_parked();
+    let request = mock.requests.lock().unwrap()[0].clone();
+    assert!(request.user.contains("I think it is fine."));
+    assert!(request.user.ends_with("Paragraph:\nMaybe so, really."));
+    // Nothing found: the marks go, with a toast.
+    assert!(marks(&editor, cx).is_empty());
+    assert_eq!(notice(&editor, cx).as_deref(), Some("Nothing marked"));
+}
+
+#[gpui::test]
+fn tab_moves_between_marks_and_the_bar_shows_the_note_under_the_cursor(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I think it is fine.", "Maybe so, really."]);
+    mock(
+        &editor,
+        cx,
+        &[
+            r#"[{"text": "I think", "note": "hedge"}]"#,
+            r#"[{"text": "really", "note": "filler"}]"#,
+        ],
+    );
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Hedges, &all, cx));
+    cx.run_until_parked();
+    let hint = |cx: &mut VisualTestContext| editor.read_with(cx, |e, _| e.lab_bar().unwrap().hint);
+    editor.update(cx, |e, _| {
+        e.selection = Selection::caret(DocPos::new(0, 10))
+    });
+    assert_eq!(hint(cx), None);
+    editor.update_in(cx, |e, window, cx| e.next_mark(&NextMark, window, cx));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.selection),
+        Selection::caret(DocPos::new(1, 10))
+    );
+    assert_eq!(hint(cx).as_deref(), Some("filler"));
+    editor.update_in(cx, |e, window, cx| e.prev_mark(&PrevMark, window, cx));
+    assert_eq!(hint(cx).as_deref(), Some("hedge"));
+    // Editing a paragraph drops its marks; Esc clears the rest.
+    type_str(&editor, cx, "Oh, ");
+    assert_eq!(marks(&editor, cx).len(), 1);
+    editor.update_in(cx, |e, window, cx| e.cancel(&Cancel, window, cx));
+    assert!(marks(&editor, cx).is_empty());
+    assert_eq!(notice(&editor, cx).as_deref(), Some("Marks cleared"));
+}
+
+#[gpui::test]
+fn ctrl_shift_g_inside_a_mark_targets_the_mark(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I think it is fine."]);
+    let mock = mock(
+        &editor,
+        cx,
+        &[r#"[{"text": "I think", "note": "hedge"}]"#, r#"["I hold"]"#],
+    );
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Hedges, &all, cx));
+    cx.run_until_parked();
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 3)));
+    editor.update_in(cx, |e, window, cx| {
+        e.ai_alternates(&AiAlternates, window, cx)
+    });
+    cx.run_until_parked();
+    let request = mock.requests.lock().unwrap()[1].clone();
+    assert!(request.user.ends_with("Passage to rewrite:\nI think"));
+    assert_eq!(texts(&editor, cx), vec!["I hold it is fine."]);
+}
+
+#[gpui::test]
+fn a_check_replaces_the_trim_preview_and_a_trim_replaces_the_marks(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["One two three four five six seven."]);
+    preview(&editor, cx, &[(0, 4..8)]);
+    editor.update(cx, |e, _| e.config.editor.long_sentence_words = 3);
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Long, &all, cx));
+    assert!(editor.read_with(cx, |e, _| e.trim_preview.is_none()));
+    assert_eq!(marks(&editor, cx).len(), 1);
+    mock(&editor, cx, &[r#"["two "]"#]);
+    editor.update(cx, |e, cx| e.run_trim(TrimLevel::Slight, &all, cx));
+    cx.run_until_parked();
+    assert!(marks(&editor, cx).is_empty());
+    assert!(editor.read_with(cx, |e, _| e.trim_preview.is_some()));
 }
