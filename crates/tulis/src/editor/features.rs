@@ -316,6 +316,9 @@ impl Editor {
             self.marks.clear();
             return self.set_notice("Marks cleared", cx);
         }
+        if self.lab_fixes.take().is_some() {
+            return cx.notify();
+        }
         let idle = self.alt_edit.is_none()
             && self
                 .vim

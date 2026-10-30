@@ -12,7 +12,7 @@ use tulis_core::ai::{AiError, CompletionRequest, prompts};
 use tulis_core::history::EditKind;
 use tulis_core::sentence;
 use tulis_core::stats;
-use tulis_core::{DocPos, ParaId, Selection};
+use tulis_core::{AiKind, DocPos, ParaId, Selection, Source};
 
 use super::{Editor, EditorEvent};
 use crate::actions::{NextMark, PrevMark};
@@ -61,6 +61,7 @@ impl TrimLevel {
 /// A guide check: it marks passages (or, for typos, proposes fixes).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Check {
+    Fix,
     Weakest,
     Long,
     Convoluted,
@@ -70,7 +71,8 @@ pub enum Check {
 
 impl Check {
     /// In the order the Lab lists them.
-    pub const ALL: [Check; 5] = [
+    pub const ALL: [Check; 6] = [
+        Check::Fix,
         Check::Weakest,
         Check::Long,
         Check::Convoluted,
@@ -80,6 +82,7 @@ impl Check {
 
     pub fn label(self) -> &'static str {
         match self {
+            Check::Fix => "Fix punctuation and typos",
             Check::Weakest => "Mark the weakest sentences",
             Check::Long => "Mark sentences that run long",
             Check::Convoluted => "Mark convoluted sentences",
@@ -91,6 +94,7 @@ impl Check {
     /// What the bar calls its marks.
     pub fn short_label(self) -> &'static str {
         match self {
+            Check::Fix => "fixes",
             Check::Weakest => "weakest sentences",
             Check::Long => "long sentences",
             Check::Convoluted => "convoluted sentences",
@@ -102,6 +106,7 @@ impl Check {
     /// The one-line description "what each idea does" shows.
     pub fn description(self) -> &'static str {
         match self {
+            Check::Fix => "AI proposes corrections as alternates; Alt+↑/↓ compares them.",
             Check::Weakest => "AI marks the sentences that do the least work.",
             Check::Long => "Marks sentences over your word limit (long_sentence_words). No AI.",
             Check::Convoluted => "AI marks sentences that are hard to follow.",
@@ -116,7 +121,7 @@ impl Check {
             Check::Convoluted => Some(MarkKind::Convoluted),
             Check::Tone => Some(MarkKind::Tone),
             Check::Hedges => Some(MarkKind::Hedges),
-            Check::Long => None,
+            Check::Fix | Check::Long => None,
         }
     }
 }
@@ -275,6 +280,9 @@ pub(crate) type LabResults = Vec<(LabJob, Result<String, AiError>)>;
 
 /// Key of the trim cache: level, paragraph and the export text that was sent.
 pub(crate) type TrimKey = (TrimLevel, ParaId, String);
+
+/// Located fixes (or marks): ranges of a paragraph's rendered text, each with its text.
+type Located = Vec<(Range<usize>, String)>;
 
 /// What a finished run found, for one paragraph: its rendered text then, and the ranges.
 type Found = Vec<(ParaId, String, Vec<Range<usize>>)>;
@@ -478,6 +486,7 @@ impl Editor {
             let cuts = cuts.into_iter().map(|(_, cut)| cut).collect();
             self.trim_preview = Some(TrimPreview::new(level, cuts));
             self.marks.clear();
+            self.lab_fixes = None;
         }
         cx.notify();
     }
@@ -485,7 +494,15 @@ impl Editor {
     /// The bar's text and buttons, if the Lab has something showing.
     pub fn lab_bar(&self) -> Option<LabBar> {
         let Some(preview) = self.trim_preview.as_ref() else {
-            let first = self.marks.first()?;
+            let Some(first) = self.marks.first() else {
+                let fixes = self.lab_fixes?;
+                let s = if fixes == 1 { "" } else { "es" };
+                return Some(LabBar {
+                    title: format!("{fixes} fix{s} proposed — Alt+↑/↓ to compare"),
+                    hint: None,
+                    actions: vec![BarAction::Clear],
+                });
+            };
             let head = self.selection.head;
             let note = self.mark_at(head).map(|ix| self.marks[ix].note.clone());
             return Some(LabBar {
@@ -539,6 +556,7 @@ impl Editor {
             BarAction::Clear => {
                 self.stop_ai();
                 self.marks.clear();
+                self.lab_fixes = None;
                 cx.notify();
             }
         }
@@ -727,6 +745,9 @@ impl Editor {
         if paras.is_empty() {
             return self.set_notice("Nothing to check", cx);
         }
+        if check == Check::Fix {
+            return self.run_fixes(paras, cx);
+        }
         let Some(kind) = check.mark_kind() else {
             let max = self.config.editor.long_sentence_words;
             let mut marks = Vec::new();
@@ -763,6 +784,99 @@ impl Editor {
             move |editor, results, total, cx| editor.apply_mark_results(check, results, total, cx),
             cx,
         );
+    }
+
+    /// "Fix punctuation and typos": one request per paragraph; the fixes become AI alternates.
+    fn run_fixes(&mut self, paras: Vec<usize>, cx: &mut Context<Self>) {
+        let Some(provider) = self.provider(cx) else {
+            return;
+        };
+        let source = Source::Ai {
+            provider: provider.name().into(),
+            model: provider.model().into(),
+            kind: AiKind::Rewrite,
+        };
+        let jobs = paras
+            .into_iter()
+            .map(|para| {
+                let p = &self.doc.paragraphs[para];
+                let export = p.export_text();
+                LabJob {
+                    para_id: p.id,
+                    text: p.text(),
+                    request: prompts::fix_request(&export),
+                    export,
+                }
+            })
+            .collect();
+        self.run_lab(
+            jobs,
+            "AI is proofreading…",
+            move |editor, results, total, cx| editor.apply_fix_results(source, results, total, cx),
+            cx,
+        );
+    }
+
+    /// Every located fix becomes an AI alternate (shown), all in one undo step.
+    fn apply_fix_results(
+        &mut self,
+        source: Source,
+        results: LabResults,
+        total: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let mut failed = 0;
+        let mut first_error = None;
+        let mut found: Vec<(usize, Located)> = Vec::new();
+        for (job, result) in results {
+            let response = match result {
+                Ok(response) => response,
+                Err(e) => {
+                    failed += 1;
+                    first_error.get_or_insert(e.to_string());
+                    continue;
+                }
+            };
+            let Some(para) = self.doc.para_index(job.para_id) else {
+                continue;
+            };
+            let p = &self.doc.paragraphs[para];
+            if p.text() != job.text {
+                continue;
+            }
+            let fixes = prompts::locate_fixes(&prompts::parse_fixes(&response), p);
+            if !fixes.is_empty() {
+                found.push((para, fixes));
+            }
+        }
+        let notice = failure_notice(failed, total, first_error);
+        if found.is_empty() {
+            if failed < total {
+                self.set_notice("No fixes needed", cx);
+            }
+        } else {
+            self.finish_alt_edit();
+            self.begin_edit(EditKind::Other, 0..self.doc.paragraphs.len());
+            let mut made = 0;
+            for (para, fixes) in found {
+                // Last first, so the earlier ranges still hold.
+                for (range, fixed) in fixes.into_iter().rev() {
+                    let added =
+                        self.doc
+                            .add_ai_alternates(para, range, vec![fixed], source.clone());
+                    if added.is_ok() {
+                        made += 1;
+                    }
+                }
+            }
+            self.trim_preview = None;
+            self.marks.clear();
+            self.lab_fixes = Some(made);
+            self.end_edit(cx);
+        }
+        if let Some(notice) = notice {
+            self.set_notice(notice, cx);
+        }
     }
 
     /// The start of the document's export text, for the tone check.
@@ -833,6 +947,7 @@ impl Editor {
         }
         self.marks = marks;
         self.trim_preview = None;
+        self.lab_fixes = None;
         cx.notify();
     }
 

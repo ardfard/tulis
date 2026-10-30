@@ -584,3 +584,67 @@ fn a_check_replaces_the_trim_preview_and_a_trim_replaces_the_marks(cx: &mut Test
     assert!(marks(&editor, cx).is_empty());
     assert!(editor.read_with(cx, |e, _| e.trim_preview.is_some()));
 }
+
+#[gpui::test]
+fn fixes_become_ai_alternates_in_one_undo_step(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Its a nice day, its true.", "Teh end."]);
+    let mock = mock(
+        &editor,
+        cx,
+        &[
+            r#"[{"original": "Its", "fixed": "It's"}, {"original": "a nice dya", "fixed": "x"}]"#,
+            r#"[{"original": "Teh", "fixed": "The"}]"#,
+        ],
+    );
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Fix, &all, cx));
+    cx.run_until_parked();
+    assert!(
+        mock.requests.lock().unwrap()[0]
+            .system
+            .contains("proofreader")
+    );
+    assert_eq!(
+        texts(&editor, cx),
+        vec!["It's a nice day, its true.", "The end."]
+    );
+    editor.read_with(cx, |e, _| {
+        let info = e
+            .doc
+            .alt_info(DocPos::new(0, 1))
+            .expect("an alternate group");
+        assert_eq!(info.count, 2);
+        assert!(e.doc.paragraphs[0].segments()[0].active_is_ai());
+    });
+    assert_eq!(
+        bar_title(&editor, cx).as_deref(),
+        Some("2 fixes proposed — Alt+↑/↓ to compare")
+    );
+    // The original is one Alt+↑ away.
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(1, 1)));
+    editor.update_in(cx, |e, window, cx| e.cycle_prev(&CyclePrev, window, cx));
+    assert_eq!(texts(&editor, cx)[1], "Teh end.");
+    // Clear hides the bar; the alternates stay.
+    editor.update(cx, |e, cx| e.bar_action(BarAction::Clear, cx));
+    assert!(editor.read_with(cx, |e, _| e.lab_bar()).is_none());
+    // One undo step for every fix (and one for the cycle).
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(
+        texts(&editor, cx),
+        vec!["Its a nice day, its true.", "Teh end."]
+    );
+    assert!(editor.read_with(cx, |e, _| e.doc.alt_info(DocPos::new(0, 1)).is_none()));
+}
+
+#[gpui::test]
+fn a_fix_check_with_nothing_to_fix_changes_nothing(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["All good."]);
+    mock(&editor, cx, &["[]"]);
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Fix, &all, cx));
+    cx.run_until_parked();
+    assert_eq!(notice(&editor, cx).as_deref(), Some("No fixes needed"));
+    assert!(!editor.read_with(cx, |e, _| e.dirty));
+    assert!(editor.read_with(cx, |e, _| e.lab_bar()).is_none());
+}

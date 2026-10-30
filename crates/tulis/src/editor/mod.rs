@@ -95,6 +95,8 @@ pub struct Editor {
     pub trim_preview: Option<TrimPreview>,
     /// The Lab's guide-check marks, in document order.
     pub marks: Vec<Mark>,
+    /// How many fixes the last "Fix punctuation and typos" proposed, while its bar shows.
+    pub lab_fixes: Option<usize>,
     /// Located cuts by level, paragraph and the text sent, with the rendered text they index.
     pub(crate) trim_cache: HashMap<lab::TrimKey, (String, Vec<Range<usize>>)>,
     pub vim: Option<Vim>,
@@ -152,6 +154,7 @@ impl Editor {
             toasts: ToastQueue::default(),
             trim_preview: None,
             marks: Vec::new(),
+            lab_fixes: None,
             trim_cache: HashMap::new(),
             vim,
             alt_edit: None,
@@ -191,6 +194,7 @@ impl Editor {
         self.overflow_changed(false);
         self.trim_preview = None;
         self.marks.clear();
+        self.lab_fixes = None;
         self.trim_cache.clear();
         self.alt_edit = None;
         self.cycled = None;

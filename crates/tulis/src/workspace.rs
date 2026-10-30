@@ -1452,8 +1452,8 @@ mod tests {
         cx.simulate_click(link.center(), gpui::Modifiers::none());
         draw(cx);
         assert!(cx.debug_bounds("lab-desc-0").is_some());
-        // The second row is the long-sentence check; it runs locally and closes the Lab.
-        cx.simulate_keystrokes("j enter");
+        // The third row is the long-sentence check; it runs locally and closes the Lab.
+        cx.simulate_keystrokes("j j enter");
         draw(cx);
         assert!(!lab_open(&ws, cx));
         let marks = ws.read_with(cx, |ws, cx| ws.editor.read(cx).marks.len());
