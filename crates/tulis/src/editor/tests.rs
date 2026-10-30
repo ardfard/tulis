@@ -1718,3 +1718,26 @@ fn undoing_a_drop_after_a_scratchpad_edit_puts_the_block_back(cx: &mut TestAppCo
     assert_eq!(texts(&editor, cx), vec!["One two."]);
     assert_eq!(overflow_of(&editor, cx), "Other. Edited.\n\nBlock.");
 }
+
+#[gpui::test]
+fn visual_stash_of_only_blank_text_leaves_no_selection_behind(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["Text.", "", "", "More."]);
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(1, 0)));
+    type_str(&editor, cx, "Vjgs");
+    assert_eq!(texts(&editor, cx), vec!["Text.", "", "", "More."]);
+    let (selection, mode) = editor.read_with(cx, |e, _| (e.selection, e.vim_mode()));
+    assert_eq!(mode, Some(Mode::Normal));
+    assert_eq!(selection.anchor, selection.head);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.last_notice().map(str::to_string)),
+        Some("Nothing to move to overflow".into())
+    );
+
+    let (editor, cx) = vim_editor(cx, &["a    b"]);
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 1)));
+    type_str(&editor, cx, "vllgs");
+    assert_eq!(texts(&editor, cx), vec!["a    b"]);
+    let (selection, mode) = editor.read_with(cx, |e, _| (e.selection, e.vim_mode()));
+    assert_eq!(mode, Some(Mode::Normal));
+    assert_eq!(selection.anchor, selection.head);
+}

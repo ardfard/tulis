@@ -931,6 +931,44 @@ mod tests {
         assert!(!page_focused(&ws, cx));
     }
 
+    #[gpui::test]
+    fn ctrl_enter_moves_multibyte_blocks_and_selections(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["Page."]);
+        let start = "Café über naïve.\n\nНовый блок — 日本語.";
+        ws.update(cx, |ws, cx| {
+            ws.editor.update(cx, |e, _| e.doc.overflow = start.into())
+        });
+        cx.simulate_keystrokes("secondary-\\");
+        cx.run_until_parked();
+        let page_text = |cx: &mut gpui::VisualTestContext| {
+            ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.paragraphs[0].text())
+        };
+        // The cursor at the end of the last block: that block moves.
+        focus_scratchpad(&ws, cx);
+        cx.simulate_keystrokes("ctrl-end");
+        cx.simulate_keystrokes("secondary-enter");
+        cx.run_until_parked();
+        assert_eq!(page_text(cx), "Новый блок — 日本語.Page.");
+        assert_eq!(scratchpad_value(&ws, cx), "Café über naïve.");
+        cx.simulate_keystrokes("secondary-z");
+        cx.run_until_parked();
+        assert_eq!(page_text(cx), "Page.");
+        assert_eq!(scratchpad_value(&ws, cx), start);
+        // A selection of multibyte words, copied.
+        focus_scratchpad(&ws, cx);
+        let from = start.find("über").unwrap();
+        let to = start.find(" naïve").unwrap() + " naïve".len();
+        set_scratchpad_caret(&ws, cx, 0);
+        let input = ws.read_with(cx, |ws, cx| {
+            ws.scratchpad.as_ref().unwrap().read(cx).input.clone()
+        });
+        input.update(cx, |input, cx| input.set_selected_range(from..to, cx));
+        cx.simulate_keystrokes("secondary-shift-enter");
+        cx.run_until_parked();
+        assert_eq!(page_text(cx), "über naïvePage.");
+        assert_eq!(scratchpad_value(&ws, cx), start);
+    }
+
     fn scratchpad_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {
         ws.update_in(cx, |ws, window, cx| ws.scratchpad_focused(window, cx))
     }
