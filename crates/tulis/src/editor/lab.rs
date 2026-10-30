@@ -12,7 +12,7 @@ use tulis_core::ai::{AiError, CompletionRequest, prompts};
 use tulis_core::history::EditKind;
 use tulis_core::sentence;
 use tulis_core::stats;
-use tulis_core::{AiKind, DocPos, ParaId, Selection, Source};
+use tulis_core::{AiKind, DocPos, ParaId, Paragraph, Selection, Source};
 
 use super::{Editor, EditorEvent};
 use crate::actions::{NextMark, PrevMark};
@@ -295,6 +295,44 @@ fn failure_notice(failed: usize, total: usize, first_error: Option<String>) -> O
         n if n == total => first_error,
         n => Some(format!("{n} of {total} paragraphs failed")),
     }
+}
+
+/// Fix options for paragraph `p`, from its located `fixes` (in text order). A fix inside an
+/// existing alternate stands for the whole group: its option is the group's shown text with the
+/// fix applied, so it joins the group's options instead of replacing the group. Fixes in the same
+/// group make one option. Each is `(span, option, number of fixes in it)`, in text order.
+fn fixes_by_group(p: &Paragraph, fixes: Located) -> Vec<(Range<usize>, String, usize)> {
+    let text = p.text();
+    let mut groups: Vec<(Range<usize>, Located)> = Vec::new();
+    for (range, fixed) in fixes {
+        let span = p.expand_to_alt_boundaries(range.clone());
+        match groups.last_mut() {
+            Some((last, members)) if span.start < last.end => {
+                // Overlapping fixes can't both apply; keep the first.
+                if members.last().is_some_and(|(r, _)| range.start < r.end) {
+                    continue;
+                }
+                last.end = last.end.max(span.end);
+                members.push((range, fixed));
+            }
+            _ => groups.push((span, vec![(range, fixed)])),
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(span, members)| {
+            let count = members.len();
+            let mut option = String::new();
+            let mut at = span.start;
+            for (range, fixed) in members {
+                option.push_str(&text[at..range.start]);
+                option.push_str(&fixed);
+                at = range.end;
+            }
+            option.push_str(&text[at..span.end]);
+            (span, option, count)
+        })
+        .collect()
 }
 
 impl Editor {
@@ -859,13 +897,14 @@ impl Editor {
             self.begin_edit(EditKind::Other, 0..self.doc.paragraphs.len());
             let mut made = 0;
             for (para, fixes) in found {
+                let options = fixes_by_group(&self.doc.paragraphs[para], fixes);
                 // Last first, so the earlier ranges still hold.
-                for (range, fixed) in fixes.into_iter().rev() {
+                for (span, option, count) in options.into_iter().rev() {
                     let added =
                         self.doc
-                            .add_ai_alternates(para, range, vec![fixed], source.clone());
+                            .add_ai_alternates(para, span, vec![option], source.clone());
                     if added.is_ok() {
-                        made += 1;
+                        made += count;
                     }
                 }
             }

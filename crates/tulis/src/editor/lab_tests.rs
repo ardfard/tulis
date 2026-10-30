@@ -648,3 +648,78 @@ fn a_fix_check_with_nothing_to_fix_changes_nothing(cx: &mut TestAppContext) {
     assert!(!editor.read_with(cx, |e, _| e.dirty));
     assert!(editor.read_with(cx, |e, _| e.lab_bar()).is_none());
 }
+
+/// The options of the alternate at `pos` (texts) and the shown one.
+fn options_at(
+    editor: &Entity<Editor>,
+    cx: &mut VisualTestContext,
+    pos: DocPos,
+) -> (Vec<String>, usize) {
+    editor.read_with(cx, |e, _| {
+        let p = &e.doc.paragraphs[pos.para];
+        let seg = p.alt_at(pos.offset).expect("an alternate group");
+        let options = p.options_at(seg).into_iter().map(|(t, _)| t).collect();
+        (options, e.doc.alt_info(pos).unwrap().index)
+    })
+}
+
+#[gpui::test]
+fn a_fix_inside_a_group_adds_the_whole_group_rebuilt(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["teh cat sat."]);
+    editor.update(cx, |e, _| {
+        e.doc.add_option(0, 0..7, "teh dog".into()).unwrap();
+        let seg = e.doc.paragraphs[0].alt_at(0).unwrap();
+        e.doc.set_active_option(0, seg, 0).unwrap();
+    });
+    assert_eq!(texts(&editor, cx), vec!["teh cat sat."]);
+    mock(&editor, cx, &[r#"[{"original": "teh", "fixed": "the"}]"#]);
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Fix, &all, cx));
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["the cat sat."]);
+    assert_eq!(
+        options_at(&editor, cx, DocPos::new(0, 1)),
+        (
+            vec!["teh cat".into(), "teh dog".into(), "the cat".into()],
+            2
+        )
+    );
+    // The original is one Alt+↑ away.
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 1)));
+    editor.update_in(cx, |e, window, cx| e.cycle_prev(&CyclePrev, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["teh dog sat."]);
+}
+
+#[gpui::test]
+fn fixes_inside_one_group_make_one_option(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["teh cat sta. Its fine."]);
+    editor.update(cx, |e, _| {
+        e.doc.make_alt(0, 0..11).unwrap();
+    });
+    mock(
+        &editor,
+        cx,
+        &[
+            r#"[{"original": "teh", "fixed": "the"}, {"original": "sta", "fixed": "sat"}, {"original": "Its", "fixed": "It's"}]"#,
+        ],
+    );
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Fix, &all, cx));
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["the cat sat. It's fine."]);
+    assert_eq!(
+        options_at(&editor, cx, DocPos::new(0, 1)),
+        (
+            vec![
+                "teh cat sta".into(),
+                "teh cat sta".into(),
+                "the cat sat".into()
+            ],
+            2
+        )
+    );
+    assert_eq!(
+        bar_title(&editor, cx).as_deref(),
+        Some("3 fixes proposed — Alt+↑/↓ to compare")
+    );
+}
