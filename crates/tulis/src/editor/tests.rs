@@ -1211,3 +1211,65 @@ fn removing_a_row_that_is_not_there_records_no_undo_step(cx: &mut TestAppContext
     });
     assert!(editor.read_with(cx, |e, _| !e.history.can_undo()));
 }
+
+#[gpui::test]
+fn a_sentence_tab_over_a_selection_ignores_the_whitespace_after_it(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["One. Two. Three."]);
+    select(&editor, cx, DocPos::new(0, 0), DocPos::new(0, 5)); // "One. "
+    editor.update(cx, |e, cx| e.open_alternates(Some(Scope::Sentence), cx));
+    assert_eq!(rows(&editor, cx), vec![row("One.", true)]);
+}
+
+#[gpui::test]
+fn edits_before_the_target_in_its_paragraph_shift_it(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    select(&editor, cx, DocPos::new(0, 3), DocPos::new(0, 3));
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    select(&editor, cx, DocPos::new(0, 0), DocPos::new(0, 0));
+    type_str(&editor, cx, "X");
+    editor.update(cx, |e, cx| e.insert_text("Oh, ", cx));
+    assert_eq!(texts(&editor, cx), vec!["XOh, I love tea"]);
+    let session = editor.read_with(cx, |e, _| e.alt_session.clone());
+    assert_eq!(session.map(|s| s.range), Some(7..11));
+    // The origin moved too: retargeting finds the same word.
+    editor.update(cx, |e, cx| e.set_alt_scope(Scope::Word, cx));
+    assert_eq!(rows(&editor, cx), vec![row("love", true)]);
+    // Deleting before it shifts it back.
+    select(&editor, cx, DocPos::new(0, 0), DocPos::new(0, 5));
+    editor.update_in(cx, |e, window, cx| e.backspace(&Backspace, window, cx));
+    let session = editor.read_with(cx, |e, _| e.alt_session.clone());
+    assert_eq!(session.map(|s| s.range), Some(2..6));
+}
+
+#[gpui::test]
+fn undo_rehighlights_the_shown_row_while_the_sidebar_stays(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Draft one."]);
+    editor.update(cx, |e, cx| {
+        e.doc.add_version(0, "Draft two.".into());
+        e.doc.set_active_version(0, 0);
+        e.open_alternates(Some(Scope::Paragraph), cx);
+        e.preview_alternate(1, cx);
+    });
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(rows(&editor, cx)[0], row("Draft one.", true));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.alt_session.as_ref().unwrap().highlight),
+        0
+    );
+}
+
+#[gpui::test]
+fn the_origin_follows_a_sentence_target(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Hello there. Bye."]);
+    select(&editor, cx, DocPos::new(0, 12), DocPos::new(0, 12));
+    editor.update(cx, |e, cx| {
+        e.open_alternates(Some(Scope::Sentence), cx);
+        e.add_alternate_text("Hi.", cx);
+    });
+    assert_eq!(texts(&editor, cx), vec!["Hi. Bye."]);
+    editor.update(cx, |e, cx| e.set_alt_scope(Scope::Sentence, cx));
+    assert_eq!(
+        rows(&editor, cx),
+        vec![row("Hello there.", false), row("Hi.", true)]
+    );
+}

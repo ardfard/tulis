@@ -45,6 +45,9 @@ pub struct AltSession {
     pub range: Range<usize>,
     /// The target's text when last seen. The sidebar closes when it is no longer at `range`.
     pub text: String,
+    /// The paragraph's text from `range.start` on, when last seen: an edit that leaves it intact
+    /// happened before the target, which then moves with it.
+    pub(crate) tail: String,
     /// The highlighted row.
     pub highlight: usize,
     /// The undo step this session's previews share: the id of the newest undo step right after
@@ -100,8 +103,18 @@ impl Editor {
                 None => word_at_caret(&text, origin.start),
             },
             Scope::Sentence => {
+                // The sentence holding the last selected character, not the one after the end.
+                let last_char = if origin.is_empty() {
+                    origin.end
+                } else {
+                    origin.end
+                        - text[..origin.end]
+                            .chars()
+                            .next_back()
+                            .map_or(0, char::len_utf8)
+                };
                 let first = sentence_range_at(&text, origin.start);
-                let last = sentence_range_at(&text, origin.end);
+                let last = sentence_range_at(&text, last_char);
                 p.expand_to_alt_boundaries(first.start.min(last.start)..first.end.max(last.end))
             }
         }
@@ -123,6 +136,7 @@ impl Editor {
             origin,
             range: 0..0,
             text: String::new(),
+            tail: String::new(),
             highlight: 0,
             preview_step: None,
         });
@@ -159,12 +173,20 @@ impl Editor {
             return;
         };
         let range = self.scope_range(para, session.scope, &session.origin, session.selection);
-        let text = self.doc.paragraphs[para].text()[range.clone()].to_string();
+        self.set_alt_range(para, range);
+        self.highlight_shown_row();
+    }
+
+    /// Point the session at `range` of paragraph `para`, noting its text and the text after it.
+    fn set_alt_range(&mut self, para: usize, range: Range<usize>) {
+        let text = self.doc.paragraphs[para].text();
+        let target = text.get(range.clone()).unwrap_or_default().to_string();
+        let tail = text.get(range.start..).unwrap_or_default().to_string();
         if let Some(session) = self.alt_session.as_mut() {
             session.range = range;
-            session.text = text;
+            session.text = target;
+            session.tail = tail;
         }
-        self.highlight_shown_row();
     }
 
     pub(crate) fn highlight_shown_row(&mut self) {
@@ -238,45 +260,61 @@ impl Editor {
         }
     }
 
-    /// Close the sidebar if its target is gone: the paragraph was deleted, or (below Paragraph
-    /// scope) the target's text is no longer at its range.
+    /// After an edit, undo or redo: follow the target, or close the sidebar if it is gone (the
+    /// paragraph was deleted, or below Paragraph scope the target's text is no longer at its
+    /// range). An edit entirely before the target, in its paragraph, moves it along. The shown
+    /// row is highlighted again.
     pub(crate) fn sync_alt_session(&mut self, cx: &mut Context<Self>) {
         let Some(session) = self.alt_session.as_ref() else {
             return;
         };
-        let alive = match self.doc.para_index(session.para_id) {
-            None => false,
-            Some(_) if session.scope == Scope::Paragraph => true,
-            Some(para) => {
-                self.doc.paragraphs[para].text().get(session.range.clone())
-                    == Some(session.text.as_str())
-            }
+        let Some(para) = self.doc.para_index(session.para_id) else {
+            return self.close_alternates(cx);
         };
-        if !alive {
-            self.close_alternates(cx);
+        if session.scope != Scope::Paragraph {
+            let text = self.doc.paragraphs[para].text();
+            let range = session.range.clone();
+            let range = if text.get(range.clone()) == Some(session.text.as_str()) {
+                Some(range)
+            } else if text.ends_with(&session.tail) {
+                // Only text before the target changed: shift it (and its origin) by the change.
+                let start = text.len() - session.tail.len();
+                let shift = |offset: usize| (offset + start).saturating_sub(range.start);
+                let origin = shift(session.origin.start)..shift(session.origin.end);
+                if let Some(session) = self.alt_session.as_mut() {
+                    session.origin = origin;
+                }
+                Some(start..start + range.len())
+            } else {
+                None
+            };
+            match range {
+                Some(range) => self.set_alt_range(para, range),
+                None => return self.close_alternates(cx),
+            }
         }
+        self.highlight_shown_row();
     }
 }
 
 impl Editor {
     /// Record the target's new range (and text) after an operation changed it.
+    /// The origin follows the target, so switching tabs later starts from where it is now.
     fn update_alt_target(&mut self, para: usize, range: Range<usize>) {
-        let text = self.doc.paragraphs[para]
-            .text()
-            .get(range.clone())
-            .unwrap_or_default()
-            .to_string();
+        let len = self.doc.paragraphs[para].len();
         if let Some(session) = self.alt_session.as_mut() {
-            if session.scope == Scope::Word {
-                session.origin = if session.selection {
-                    range.clone()
-                } else {
-                    range.start..range.start
-                };
-            }
-            session.range = range;
-            session.text = text;
+            let inside = range.start <= session.origin.start && session.origin.end <= range.end;
+            session.origin = match session.scope {
+                Scope::Word if session.selection => range.clone(),
+                Scope::Word => range.start..range.start,
+                // A caret or selection inside a sentence target stays where it is.
+                Scope::Sentence if inside => session.origin.clone(),
+                Scope::Sentence if session.selection => range.clone(),
+                Scope::Sentence => range.start..range.start,
+                Scope::Paragraph => session.origin.start.min(len)..session.origin.end.min(len),
+            };
         }
+        self.set_alt_range(para, range);
     }
 
     /// Highlight row `index` and show it in the page. A session's previews share one undo step
