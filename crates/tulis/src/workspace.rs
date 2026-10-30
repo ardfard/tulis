@@ -432,6 +432,7 @@ impl Render for Workspace {
                         row.children(self.scratchpad.clone())
                     }),
             )
+            .children(self.render_lab_bar(cx))
             .child(self.render_footer(cx))
             .child(self.render_toasts(cx))
     }
@@ -1402,6 +1403,30 @@ mod tests {
             assert!(!e.lab_running());
             assert_eq!(e.last_notice(), Some("Lab stopped"));
         });
+    }
+
+    #[gpui::test]
+    fn the_bar_shows_a_trim_preview_and_its_buttons_work(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["I really love tea."]);
+        draw(cx);
+        assert!(cx.debug_bounds("lab-bar").is_none());
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        let mock = lab_mock(&ws, cx, &[r#"["really "]"#]);
+        editor.update(cx, |e, cx| {
+            let scope = e.lab_scope();
+            e.run_trim(crate::editor::TrimLevel::Slight, &scope, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(mock.requests.lock().unwrap().len(), 1);
+        draw(cx);
+        assert!(cx.debug_bounds("lab-bar").is_some());
+        let button = cx.debug_bounds("lab-bar-make-cuts").expect("Make the cuts");
+        cx.simulate_click(button.center(), gpui::Modifiers::none());
+        draw(cx);
+        assert!(cx.debug_bounds("lab-bar").is_none());
+        let export = editor.read_with(cx, |e, _| e.doc.paragraphs[0].export_text());
+        assert_eq!(export, "I love tea.");
+        assert!(page_focused(&ws, cx));
     }
 
     #[gpui::test]

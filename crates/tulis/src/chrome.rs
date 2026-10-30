@@ -275,6 +275,55 @@ impl Workspace {
         self.share(ShareTarget::LinkedIn, cx);
     }
 
+    /// The Lab bar above the footer: what the Lab is showing, with its buttons.
+    pub(crate) fn render_lab_bar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let editor = self.editor.read(cx);
+        let t = editor.theme;
+        let bar = editor.lab_bar()?;
+        Some(
+            div()
+                .id("lab-bar")
+                .debug_selector(|| "lab-bar".into())
+                .flex_none()
+                .px_4()
+                .py_1()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .border_t_1()
+                .border_color(t.rule)
+                .bg(t.panel)
+                .text_xs()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .flex()
+                        .flex_col()
+                        .child(div().text_color(t.text).child(bar.title))
+                        .children(
+                            bar.hint
+                                .map(|hint| div().text_color(t.text_muted).child(hint)),
+                        ),
+                )
+                .children(bar.actions.into_iter().map(|action| {
+                    div()
+                        .debug_selector(move || format!("lab-bar-{}", action.id()))
+                        .child(
+                            Button::new(action.id())
+                                .ghost()
+                                .xsmall()
+                                .label(action.label())
+                                .on_click(cx.listener(move |ws, _: &ClickEvent, window, cx| {
+                                    ws.editor.update(cx, |e, cx| e.bar_action(action, cx));
+                                    ws.focus_editor(window, cx);
+                                })),
+                        )
+                })),
+        )
+    }
+
     /// Save/Open/Share on the left, LAB in the middle, XYZ (Overflow) on the right.
     pub(crate) fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = self.editor.read(cx).theme;

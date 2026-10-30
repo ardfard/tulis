@@ -180,6 +180,10 @@ impl Editor {
     }
 
     pub(super) fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) {
+        // Enter in a trim preview's cut keeps it (or makes a kept one active again).
+        if self.selection.is_empty() && self.toggle_cut_at(self.selection.head, cx) {
+            return;
+        }
         if self.vim_captures_text() {
             return self.vertical_move(1, false, cx);
         }
@@ -284,7 +288,13 @@ impl Editor {
                 };
                 self.set_selection(selection, cx);
             }
-            _ => self.move_to(pos, event.modifiers.shift, cx),
+            _ => {
+                self.move_to(pos, event.modifiers.shift, cx);
+                // A click on a trim preview's cut keeps it, or makes a kept one active again.
+                if !event.modifiers.shift {
+                    self.toggle_cut_at(pos, cx);
+                }
+            }
         }
     }
 

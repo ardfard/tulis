@@ -8,7 +8,7 @@ use tulis_core::ai::{AiError, CompletionRequest, LlmProvider, MockProvider};
 use tulis_core::vim::Vim;
 use tulis_core::{DocPos, ParaId, Selection};
 
-use super::lab::TrimSuggestion;
+use super::lab::{BarAction, TrimSuggestion};
 use super::tests::{editor_with, texts, type_str};
 use super::{Editor, TrimLevel, TrimPreview};
 use crate::actions::*;
@@ -243,4 +243,101 @@ fn partial_failures_toast_how_many_paragraphs_failed(cx: &mut TestAppContext) {
     );
     // The earlier preview stays.
     assert_eq!(cut_ranges(&editor, cx), vec![(0, 2..9)]);
+}
+
+fn bar_title(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Option<String> {
+    editor.read_with(cx, |e, _| e.lab_bar().map(|bar| bar.title))
+}
+
+#[gpui::test]
+fn the_bar_counts_words_before_and_after_the_active_cuts(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea.", "It is very, very good."]);
+    assert_eq!(bar_title(&editor, cx), None);
+    preview(&editor, cx, &[(0, 2..9), (1, 6..12)]);
+    assert_eq!(
+        bar_title(&editor, cx).as_deref(),
+        Some("Slight trim 9 → 7 words · −22%")
+    );
+    let bar = editor.read_with(cx, |e, _| e.lab_bar()).unwrap();
+    assert_eq!(
+        bar.hint.as_deref(),
+        Some("Faded words would go. Click one to keep it.")
+    );
+    assert_eq!(bar.actions, vec![BarAction::MakeCuts, BarAction::Done]);
+    // A kept cut counts again.
+    editor.update(cx, |e, cx| assert!(e.toggle_cut_at(DocPos::new(0, 4), cx)));
+    assert_eq!(
+        bar_title(&editor, cx).as_deref(),
+        Some("Slight trim 9 → 8 words · −11%")
+    );
+}
+
+#[gpui::test]
+fn clicking_or_enter_keeps_a_cut_and_clicking_again_reactivates_it(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea."]);
+    preview(&editor, cx, &[(0, 2..9)]);
+    let active = |cx: &mut VisualTestContext| {
+        editor.read_with(cx, |e, _| e.trim_preview.as_ref().unwrap().is_active(0))
+    };
+    // Enter with the cursor in a cut keeps it, and doesn't split the paragraph.
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 5)));
+    editor.update_in(cx, |e, window, cx| e.newline(&Newline, window, cx));
+    assert!(!active(cx));
+    assert_eq!(texts(&editor, cx), vec!["I really love tea."]);
+    // A click on a kept cut makes it active again; a click elsewhere does nothing.
+    editor.update(cx, |e, cx| assert!(e.toggle_cut_at(DocPos::new(0, 3), cx)));
+    assert!(active(cx));
+    editor.update(cx, |e, cx| {
+        assert!(!e.toggle_cut_at(DocPos::new(0, 12), cx))
+    });
+    assert!(active(cx));
+    // Enter outside every cut starts a new paragraph as usual.
+    editor.update(cx, |e, _| {
+        e.selection = Selection::caret(DocPos::new(0, 13))
+    });
+    editor.update_in(cx, |e, window, cx| e.newline(&Newline, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["I really love", " tea."]);
+}
+
+#[gpui::test]
+fn make_the_cuts_ghosts_every_active_cut_in_one_undo_step(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea, truly.", "It is very good."]);
+    preview(&editor, cx, &[(0, 2..9), (0, 17..24), (1, 6..11)]);
+    editor.update(cx, |e, cx| assert!(e.toggle_cut_at(DocPos::new(0, 20), cx)));
+    editor.update(cx, |e, cx| e.bar_action(BarAction::MakeCuts, cx));
+    let exports = |cx: &mut VisualTestContext| {
+        editor.read_with(cx, |e, _| {
+            e.doc
+                .paragraphs
+                .iter()
+                .map(|p| p.export_text())
+                .collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(exports(cx), vec!["I love tea, truly.", "It is good."]);
+    assert!(editor.read_with(cx, |e, _| e.trim_preview.is_none()));
+    assert_eq!(
+        notice(&editor, cx).as_deref(),
+        Some("Cut 2 passages (ghosted — Ctrl+Z to undo)")
+    );
+    // The rendered text is unchanged; one undo revives every cut.
+    assert_eq!(
+        texts(&editor, cx),
+        vec!["I really love tea, truly.", "It is very good."]
+    );
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(
+        exports(cx),
+        vec!["I really love tea, truly.", "It is very good."]
+    );
+}
+
+#[gpui::test]
+fn done_clears_the_preview_without_changes(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea."]);
+    preview(&editor, cx, &[(0, 2..9)]);
+    editor.update(cx, |e, cx| e.bar_action(BarAction::Done, cx));
+    assert!(editor.read_with(cx, |e, _| e.trim_preview.is_none()));
+    assert!(!editor.read_with(cx, |e, _| e.dirty));
+    assert_eq!(texts(&editor, cx), vec!["I really love tea."]);
 }

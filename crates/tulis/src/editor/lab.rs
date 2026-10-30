@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::{Context, Window, prelude::*};
 use tulis_core::ai::{AiError, CompletionRequest, prompts};
+use tulis_core::history::EditKind;
+use tulis_core::stats;
 use tulis_core::{DocPos, ParaId, Selection};
 
 use super::{Editor, EditorEvent};
@@ -107,6 +109,38 @@ impl TrimPreview {
             }
         }
     }
+}
+
+/// A button on the Lab bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarAction {
+    MakeCuts,
+    Done,
+}
+
+impl BarAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            BarAction::MakeCuts => "Make the cuts",
+            BarAction::Done => "Done",
+        }
+    }
+
+    /// For element ids and test selectors.
+    pub fn id(self) -> &'static str {
+        match self {
+            BarAction::MakeCuts => "make-cuts",
+            BarAction::Done => "done",
+        }
+    }
+}
+
+/// The bar above the footer while the Lab has something on the page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LabBar {
+    pub title: String,
+    pub hint: Option<String>,
+    pub actions: Vec<BarAction>,
 }
 
 /// One paragraph's Lab request, with the paragraph as it was when asked (results for a
@@ -329,6 +363,85 @@ impl Editor {
             self.trim_preview = Some(TrimPreview::new(level, cuts));
         }
         cx.notify();
+    }
+
+    /// The bar's text and buttons, if the Lab has something showing.
+    pub fn lab_bar(&self) -> Option<LabBar> {
+        let preview = self.trim_preview.as_ref()?;
+        let before = stats::document_counts(&self.doc).words;
+        let after = stats::words_without(&self.doc, &self.lab_items());
+        let pct = if before == 0 {
+            0
+        } else {
+            ((before - after.min(before)) as f32 * 100. / before as f32).round() as usize
+        };
+        Some(LabBar {
+            title: format!(
+                "{} {before} → {after} words · −{pct}%",
+                preview.level.label()
+            ),
+            hint: Some("Faded words would go. Click one to keep it.".into()),
+            actions: vec![BarAction::MakeCuts, BarAction::Done],
+        })
+    }
+
+    /// A click on the bar.
+    pub fn bar_action(&mut self, action: BarAction, cx: &mut Context<Self>) {
+        match action {
+            BarAction::MakeCuts => self.make_cuts(cx),
+            BarAction::Done => {
+                self.stop_ai();
+                self.trim_preview = None;
+                cx.notify();
+            }
+        }
+    }
+
+    /// Ghost every active cut, as one undo step, and close the preview.
+    fn make_cuts(&mut self, cx: &mut Context<Self>) {
+        self.finish_alt_edit();
+        let cuts = self.lab_items();
+        if cuts.is_empty() {
+            return self.set_notice("No cuts to make", cx);
+        }
+        // Not `begin_edit`: ghosting leaves the rendered text (and so the other cuts) as is.
+        self.record_step(EditKind::Other);
+        let mut made = 0;
+        for (para, range) in cuts {
+            if self.doc.set_ghost(para, range, true).is_ok() {
+                made += 1;
+            }
+        }
+        self.trim_preview = None;
+        self.dirty = true;
+        self.end_edit(cx);
+        let passages = if made == 1 { "passage" } else { "passages" };
+        self.set_notice(
+            format!("Cut {made} {passages} (ghosted — Ctrl+Z to undo)"),
+            cx,
+        );
+    }
+
+    /// A click (or Enter) at `pos`: keep the active cut there, or make a kept one active
+    /// again. Returns false when there is no cut at `pos`.
+    pub(crate) fn toggle_cut_at(&mut self, pos: DocPos, cx: &mut Context<Self>) -> bool {
+        let Some(id) = self.doc.paragraphs.get(pos.para).map(|p| p.id) else {
+            return false;
+        };
+        let Some(preview) = &mut self.trim_preview else {
+            return false;
+        };
+        let hit = preview.cuts.iter().position(|cut| {
+            cut.para_id == id && cut.range.start <= pos.offset && pos.offset <= cut.range.end
+        });
+        let Some(ix) = hit else {
+            return false;
+        };
+        if !preview.kept.remove(&ix) {
+            preview.kept.insert(ix);
+        }
+        cx.notify();
+        true
     }
 
     /// The active cuts of the trim preview, as `(paragraph, range)` in document order.
