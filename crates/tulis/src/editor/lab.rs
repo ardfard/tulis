@@ -199,6 +199,7 @@ impl TrimPreview {
     }
 
     /// The active cuts in paragraph `id` (drawn faded).
+    #[cfg(test)]
     pub fn active_ranges(&self, id: ParaId) -> Vec<Range<usize>> {
         self.cuts
             .iter()
@@ -328,6 +329,9 @@ impl TrimCache {
         self.order.clear();
     }
 }
+
+/// Byte ranges of paragraphs' rendered text, by paragraph.
+pub(crate) type RangesByPara = HashMap<ParaId, Vec<Range<usize>>>;
 
 /// Located fixes (or marks): ranges of a paragraph's rendered text, each with its text.
 type Located = Vec<(Range<usize>, String)>;
@@ -870,13 +874,22 @@ impl Editor {
             .or_else(|| self.marks.iter().position(under))
     }
 
-    /// The marks in paragraph `id` (drawn tinted).
-    pub(crate) fn mark_ranges(&self, id: ParaId) -> Vec<Range<usize>> {
-        self.marks
-            .iter()
-            .filter(|m| m.para_id == id)
-            .map(|m| m.range.clone())
-            .collect()
+    /// The trim preview's active cuts (drawn faded) and the marks (drawn tinted), each grouped
+    /// by paragraph once, for a frame.
+    pub(crate) fn lab_ranges_by_para(&self) -> (RangesByPara, RangesByPara) {
+        let mut cuts = RangesByPara::new();
+        if let Some(preview) = &self.trim_preview {
+            for (ix, cut) in preview.cuts.iter().enumerate() {
+                if preview.is_active(ix) {
+                    cuts.entry(cut.para_id).or_default().push(cut.range.clone());
+                }
+            }
+        }
+        let mut marks = RangesByPara::new();
+        for m in &self.marks {
+            marks.entry(m.para_id).or_default().push(m.range.clone());
+        }
+        (cuts, marks)
     }
 
     /// Run `check` over the paragraphs in `scope`. The long-sentence check is local; the others
@@ -1108,11 +1121,18 @@ impl Editor {
     /// The active cuts of the trim preview, or else the marks, as `(paragraph, range)` in
     /// document order.
     fn lab_items(&self) -> Vec<(usize, Range<usize>)> {
+        let index: HashMap<ParaId, usize> = self
+            .doc
+            .paragraphs
+            .iter()
+            .enumerate()
+            .map(|(ix, p)| (p.id, ix))
+            .collect();
         let Some(preview) = &self.trim_preview else {
             return self
                 .marks
                 .iter()
-                .filter_map(|m| Some((self.doc.para_index(m.para_id)?, m.range.clone())))
+                .filter_map(|m| Some((*index.get(&m.para_id)?, m.range.clone())))
                 .collect();
         };
         preview
@@ -1120,7 +1140,7 @@ impl Editor {
             .iter()
             .enumerate()
             .filter(|(ix, _)| preview.is_active(*ix))
-            .filter_map(|(_, cut)| Some((self.doc.para_index(cut.para_id)?, cut.range.clone())))
+            .filter_map(|(_, cut)| Some((*index.get(&cut.para_id)?, cut.range.clone())))
             .collect()
     }
 

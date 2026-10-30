@@ -1017,3 +1017,17 @@ fn the_long_sentence_check_leaves_ghosted_words_out(cx: &mut TestAppContext) {
     editor.update(cx, |e, cx| e.run_check(Check::Long, &all, cx));
     assert!(marks(&editor, cx).is_empty());
 }
+
+#[gpui::test]
+fn a_frame_gets_active_cuts_and_marks_grouped_by_paragraph(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea, truly.", "It is very good."]);
+    preview(&editor, cx, &[(0, 2..9), (0, 17..24), (1, 6..11)]);
+    editor.update(cx, |e, cx| assert!(e.toggle_cut_at(DocPos::new(0, 20), cx)));
+    editor.read_with(cx, |e, _| {
+        let (a, b) = (e.doc.paragraphs[0].id, e.doc.paragraphs[1].id);
+        let (cuts, marks) = e.lab_ranges_by_para();
+        assert_eq!(cuts[&a], vec![2..9]);
+        assert_eq!(cuts[&b], vec![6..11]);
+        assert!(marks.is_empty());
+    });
+}

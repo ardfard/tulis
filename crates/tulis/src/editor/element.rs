@@ -92,15 +92,13 @@ fn build_layout(
             editor.doc.pos_from_flat(r.end),
         )
     });
+    let (cuts_by_para, marks_by_para) = editor.lab_ranges_by_para();
     let mut top = px(0.);
     let mut paras = Vec::with_capacity(editor.doc.paragraphs.len());
     for (i, p) in editor.doc.paragraphs.iter().enumerate() {
         let text = p.text();
-        let cuts = editor
-            .trim_preview
-            .as_ref()
-            .map(|t| t.active_ranges(p.id))
-            .unwrap_or_default();
+        let cuts = cuts_by_para.get(&p.id).map_or(&[][..], Vec::as_slice);
+        let marks = marks_by_para.get(&p.id).map_or(&[][..], Vec::as_slice);
         let marked_here =
             marked.and_then(|(a, b)| (a.para == i && b.para == i).then(|| a.offset..b.offset));
         let text_len = text.len();
@@ -111,8 +109,8 @@ fn build_layout(
         let runs = build_runs(
             text_len,
             &p.spans(),
-            &cuts,
-            &editor.mark_ranges(p.id),
+            cuts,
+            marks,
             marked_here,
             title_marker,
             caret_on_marker,
