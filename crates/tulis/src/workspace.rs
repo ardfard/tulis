@@ -1022,6 +1022,52 @@ mod tests {
     }
 
     #[gpui::test]
+    fn undo_and_redo_work_while_the_sidebar_has_focus(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["Draft one."]);
+        ws.update(cx, |ws, cx| {
+            ws.editor.update(cx, |e, cx| {
+                e.doc.add_version(0, "Draft two.".into());
+                e.doc.set_active_version(0, 0);
+                e.open_alternates(Some(crate::editor::Scope::Paragraph), cx);
+            })
+        });
+        cx.run_until_parked();
+        let text = |cx: &mut gpui::VisualTestContext| {
+            ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.paragraphs[0].text())
+        };
+        cx.simulate_keystrokes("j");
+        assert_eq!(text(cx), "Draft two.");
+        cx.simulate_keystrokes("secondary-z");
+        assert_eq!(text(cx), "Draft one.");
+        cx.simulate_keystrokes("secondary-shift-z");
+        assert_eq!(text(cx), "Draft two.");
+        cx.simulate_keystrokes("secondary-z ctrl-y");
+        assert_eq!(text(cx), "Draft two.");
+        assert!(sidebar_focused(&ws, cx));
+    }
+
+    #[gpui::test]
+    fn shift_f10_and_the_menu_key_open_the_context_menu_at_the_caret(cx: &mut TestAppContext) {
+        for key in ["shift-f10", "menu"] {
+            let (ws, cx) = root_workspace(cx, &["I love green tea"]);
+            cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(700.)));
+            ws.update(cx, |ws, cx| {
+                ws.editor
+                    .update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 9)))
+            });
+            cx.run_until_parked();
+            cx.simulate_keystrokes(key);
+            cx.run_until_parked();
+            let sel = ws.read_with(cx, |ws, cx| ws.editor.read(cx).selection.range());
+            assert_eq!(sel, DocPos::new(0, 7)..DocPos::new(0, 12), "{key}");
+            cx.simulate_keystrokes("down enter");
+            cx.run_until_parked();
+            let session = ws.read_with(cx, |ws, cx| ws.editor.read(cx).alt_session.clone());
+            assert_eq!(session.map(|s| s.range), Some(7..12), "{key}");
+        }
+    }
+
+    #[gpui::test]
     fn toasts_stack_two_and_expire(cx: &mut TestAppContext) {
         init(cx);
         let (ws, cx) = cx.add_window_view(|window, cx| {

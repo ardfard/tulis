@@ -269,6 +269,15 @@ pub static COMMANDS: &[Command] = &[
         Cancel
     ),
     cmd!(
+        "context_menu",
+        "Context menu",
+        Editing,
+        ["shift-f10", "menu"],
+        ED,
+        None,
+        OpenContextMenu
+    ),
+    cmd!(
         "toggle_vim",
         "Toggle vim mode",
         Editing,
@@ -295,6 +304,25 @@ pub static COMMANDS: &[Command] = &[
         Some("AltSidebar"),
         None,
         CloseAlternates
+    ),
+    // The sidebar forwards undo/redo to the page (its text field keeps its own).
+    cmd!(
+        "alt_undo",
+        "Sidebar: undo",
+        Hidden,
+        ["secondary-z"],
+        Some("AltSidebar"),
+        None,
+        Undo
+    ),
+    cmd!(
+        "alt_redo",
+        "Sidebar: redo",
+        Hidden,
+        ["secondary-shift-z", "ctrl-y"],
+        Some("AltSidebar"),
+        None,
+        Redo
     ),
     cmd!(
         "alt_next",
@@ -534,7 +562,8 @@ pub static COMMANDS: &[Command] = &[
 ];
 
 /// Every key binding in the table. `KeyBinding::load` (unlike `new`) resolves `secondary-`
-/// to Cmd or Ctrl for the host OS.
+/// to Cmd or Ctrl for the host OS. A command's keys are bound last-to-first: gpui gives the
+/// last-bound binding precedence for display (menus, `Kbd`), and that must be `keys[0]`.
 pub fn key_bindings(cx: &App) -> Vec<KeyBinding> {
     COMMANDS
         .iter()
@@ -542,7 +571,7 @@ pub fn key_bindings(cx: &App) -> Vec<KeyBinding> {
             let context = c.context.map(|ctx| {
                 Rc::new(KeyBindingContextPredicate::parse(ctx).expect("valid key context"))
             });
-            c.keys.iter().map(move |keys| {
+            c.keys.iter().rev().map(move |keys| {
                 KeyBinding::load(keys, (c.action)(), context.clone(), false, None, cx)
                     .unwrap_or_else(|e| panic!("bad keystroke {keys:?}: {e:?}"))
             })

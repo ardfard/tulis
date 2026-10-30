@@ -52,6 +52,7 @@ gpui::actions!(
         AiTrimDocument,
         AcceptTrim,
         Cancel,
+        OpenContextMenu,
         ToggleVim,
         CycleTheme,
         ToggleMarkers,

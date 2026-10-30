@@ -10,7 +10,7 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::tab::{Tab, TabBar};
 
 use crate::actions::{
-    AiAlternates, AltFocusInput, AltKeep, AltNext, AltPrev, AltRemove, CloseAlternates,
+    AiAlternates, AltFocusInput, AltKeep, AltNext, AltPrev, AltRemove, CloseAlternates, Redo, Undo,
 };
 use crate::editor::{Editor, Scope};
 use crate::workspace::Workspace;
@@ -74,6 +74,14 @@ impl AltSidebar {
     /// Esc: close the sidebar, keeping the shown option (the workspace refocuses the page).
     fn close(&mut self, _: &CloseAlternates, _: &mut Window, cx: &mut Context<Self>) {
         self.editor.update(cx, |e, cx| e.close_alternates(cx));
+    }
+
+    fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, cx| e.undo_steps(1, cx));
+    }
+
+    fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, cx| e.redo_steps(1, cx));
     }
 
     fn next(&mut self, _: &AltNext, _: &mut Window, cx: &mut Context<Self>) {
@@ -150,6 +158,8 @@ impl Render for AltSidebar {
             .key_context("AltSidebar")
             .on_action(cx.listener(Self::close))
             .on_action(cx.listener(Self::ask_ai))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
             .w(px(SIDEBAR_WIDTH))
             .flex_none()
             .h_full()

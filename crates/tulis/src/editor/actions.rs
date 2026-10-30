@@ -1,6 +1,9 @@
 //! Movement, editing, clipboard, undo and mouse handlers.
 
-use gpui::{ClipboardItem, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Window};
+use gpui::{
+    ClipboardItem, Context, InputEvent as _, Modifiers, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Window,
+};
 use tulis_core::history::EditKind;
 use tulis_core::motion as mv;
 use tulis_core::{DocPos, Selection};
@@ -299,6 +302,40 @@ impl Editor {
         };
         let pos = self.doc.clamp(layout.pos_for_window_point(event.position));
         self.target_for_context_menu(pos, cx);
+    }
+
+    /// Shift+F10 / the Menu key: open the context menu at the caret, as a right-click there.
+    pub(super) fn open_context_menu(
+        &mut self,
+        _: &OpenContextMenu,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(layout) = self.layout.as_ref() else {
+            return;
+        };
+        let Some(caret) = layout.window_point(self.selection.head) else {
+            return;
+        };
+        let position = gpui::point(caret.x, caret.y + layout.line_height / 2.);
+        // Deferred: a mouse event can't be dispatched while this key event is.
+        window.defer(cx, move |window, cx| {
+            let down = MouseDownEvent {
+                button: MouseButton::Right,
+                position,
+                modifiers: Modifiers::none(),
+                click_count: 1,
+                first_mouse: false,
+            };
+            let up = MouseUpEvent {
+                button: MouseButton::Right,
+                position,
+                modifiers: Modifiers::none(),
+                click_count: 1,
+            };
+            window.dispatch_event(down.to_platform_input(), cx);
+            window.dispatch_event(up.to_platform_input(), cx);
+        });
     }
 
     pub(crate) fn target_for_context_menu(&mut self, pos: DocPos, cx: &mut Context<Self>) {
