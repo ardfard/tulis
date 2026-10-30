@@ -994,3 +994,26 @@ fn escape_leaves_vim_insert_and_alt_editing_before_clearing_the_lab(cx: &mut Tes
     escape(cx);
     assert!(editor.read_with(cx, |e, _| e.trim_preview.is_none()));
 }
+
+#[gpui::test]
+fn the_long_sentence_check_leaves_ghosted_words_out(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Short one. This one has really very many words."]);
+    editor.update(cx, |e, _| {
+        e.doc.set_ghost(0, 24..41, true).unwrap();
+        e.config.editor.long_sentence_words = 3;
+    });
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Long, &all, cx));
+    assert_eq!(
+        marks(&editor, cx),
+        vec![(
+            0,
+            "This one has really very many words.".to_string(),
+            "4 words".to_string()
+        )]
+    );
+    // Over the limit only with the ghosted words: not marked.
+    editor.update(cx, |e, _| e.config.editor.long_sentence_words = 4);
+    editor.update(cx, |e, cx| e.run_check(Check::Long, &all, cx));
+    assert!(marks(&editor, cx).is_empty());
+}

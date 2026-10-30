@@ -900,7 +900,13 @@ impl Editor {
             let mut marks = Vec::new();
             for para in paras {
                 let p = &self.doc.paragraphs[para];
-                for (range, words) in sentence::long_sentences(&p.text(), max) {
+                let ghosts: Vec<Range<usize>> = p
+                    .spans()
+                    .into_iter()
+                    .filter(|s| s.ghost)
+                    .map(|s| s.range)
+                    .collect();
+                for (range, words) in sentence::long_sentences(&p.text(), &ghosts, max) {
                     marks.push(Mark {
                         para_id: p.id,
                         range,

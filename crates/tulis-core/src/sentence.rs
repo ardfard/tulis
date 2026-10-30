@@ -76,13 +76,22 @@ pub fn sentence_ranges(text: &str) -> Vec<Range<usize>> {
 }
 
 /// The sentences of `text` with more than `max_words` whitespace-separated words, with their
-/// word counts (the Lab's "Mark sentences that run long" check).
-pub fn long_sentences(text: &str, max_words: usize) -> Vec<(Range<usize>, usize)> {
+/// word counts (the Lab's "Mark sentences that run long" check). Words in the `hidden` byte
+/// ranges (ghosts) aren't counted; the sentence ranges are still ranges of `text`.
+pub fn long_sentences(
+    text: &str,
+    hidden: &[Range<usize>],
+    max_words: usize,
+) -> Vec<(Range<usize>, usize)> {
     sentence_ranges(text)
         .into_iter()
         .map(|range| {
-            let words = text[range.clone()].split_whitespace().count();
-            (range, words)
+            let visible: String = text[range.clone()]
+                .char_indices()
+                .filter(|(at, _)| !hidden.iter().any(|h| h.contains(&(range.start + at))))
+                .map(|(_, c)| c)
+                .collect();
+            (range, visible.split_whitespace().count())
         })
         .filter(|&(_, words)| words > max_words)
         .collect()
@@ -116,10 +125,13 @@ mod tests {
     #[test]
     fn long_sentences_are_those_over_the_limit() {
         let text = "One two three. One two three four five! Short.";
-        assert_eq!(long_sentences(text, 3), vec![(15..39, 5)]);
-        assert!(long_sentences(text, 5).is_empty());
-        assert_eq!(long_sentences(text, 0).len(), 3);
-        assert!(long_sentences("", 0).is_empty());
+        assert_eq!(long_sentences(text, &[], 3), vec![(15..39, 5)]);
+        assert!(long_sentences(text, &[], 5).is_empty());
+        assert_eq!(long_sentences(text, &[], 0).len(), 3);
+        assert!(long_sentences("", &[], 0).is_empty());
+        // Hidden words don't count, but the range stays the whole sentence.
+        assert_eq!(long_sentences(text, &[19..23], 3), vec![(15..39, 4)]);
+        assert!(long_sentences(text, &[19..29], 3).is_empty());
     }
 
     #[test]
