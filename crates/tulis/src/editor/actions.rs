@@ -276,6 +276,7 @@ impl Editor {
         }
         let pos = self.doc.clamp(layout.pos_for_window_point(event.position));
         self.is_selecting = true;
+        self.click_at = None;
         match event.click_count {
             2 => {
                 let text = self.doc.paragraphs[pos.para].text();
@@ -296,9 +297,10 @@ impl Editor {
             }
             _ => {
                 self.move_to(pos, event.modifiers.shift, cx);
-                // A click on a trim preview's cut keeps it, or makes a kept one active again.
+                // A click on a trim preview's cut keeps it, or makes a kept one active again:
+                // on mouse-up, unless the press became a drag.
                 if !event.modifiers.shift {
-                    self.toggle_cut_at(pos, cx);
+                    self.click_at = Some((pos, self.selection));
                 }
             }
         }
@@ -412,8 +414,14 @@ impl Editor {
         self.move_to(pos, true, cx);
     }
 
-    pub(super) fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    pub(super) fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.is_selecting = false;
+        // A click that didn't drag (the selection is as the press left it) toggles a cut.
+        if let Some((pos, selection)) = self.click_at.take()
+            && self.selection == selection
+        {
+            self.toggle_cut_at(pos, cx);
+        }
     }
 
     pub(super) fn on_key_down(

@@ -869,3 +869,89 @@ fn the_trim_cache_keeps_the_newest_64_answers(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(mock.requests.lock().unwrap().len(), 66);
 }
+
+#[gpui::test]
+fn enter_at_the_end_of_a_cut_splits_the_paragraph(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea."]);
+    preview(&editor, cx, &[(0, 14..18)]);
+    editor.update(cx, |e, _| {
+        e.selection = Selection::caret(DocPos::new(0, 18))
+    });
+    editor.update_in(cx, |e, window, cx| e.newline(&Newline, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["I really love tea.", ""]);
+}
+
+#[gpui::test]
+fn a_drag_that_starts_in_a_cut_selects_without_keeping_it(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea."]);
+    preview(&editor, cx, &[(0, 2..9)]);
+    cx.simulate_resize(gpui::size(gpui::px(800.), gpui::px(600.)));
+    cx.run_until_parked();
+    let point = |cx: &mut VisualTestContext, offset| {
+        editor.read_with(cx, |e, _| {
+            let layout = e.layout.as_ref().expect("painted");
+            let p = layout.window_point(DocPos::new(0, offset)).unwrap();
+            gpui::point(p.x + gpui::px(1.), p.y + layout.line_height / 2.)
+        })
+    };
+    let active = |cx: &mut VisualTestContext| {
+        editor.read_with(cx, |e, _| e.trim_preview.as_ref().unwrap().is_active(0))
+    };
+    let (from, to) = (point(cx, 4), point(cx, 12));
+    let none = gpui::Modifiers::none();
+    cx.simulate_mouse_down(from, gpui::MouseButton::Left, none);
+    cx.simulate_mouse_move(to, gpui::MouseButton::Left, none);
+    cx.simulate_mouse_up(to, gpui::MouseButton::Left, none);
+    assert!(active(cx));
+    assert_eq!(
+        selected(&editor, cx),
+        (DocPos::new(0, 4), DocPos::new(0, 12))
+    );
+    // A click without moving keeps it.
+    cx.simulate_mouse_down(from, gpui::MouseButton::Left, none);
+    cx.simulate_mouse_up(from, gpui::MouseButton::Left, none);
+    assert!(!active(cx));
+}
+
+#[gpui::test]
+fn clicking_a_cut_during_a_walk_does_nothing(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea, truly.", "It is very good."]);
+    preview(&editor, cx, &[(0, 2..9), (0, 17..24), (1, 6..11)]);
+    editor.update(cx, |e, cx| e.bar_action(BarAction::Walk, cx));
+    editor.update(cx, |e, cx| {
+        assert!(!e.toggle_cut_at(DocPos::new(0, 20), cx))
+    });
+    let preview = editor.read_with(cx, |e, _| e.trim_preview.clone()).unwrap();
+    assert!(preview.kept.is_empty());
+    assert_eq!(bar_title(&editor, cx).as_deref(), Some("Cut 1 of 3"));
+    type_str(&editor, cx, "n");
+    assert_eq!(bar_title(&editor, cx).as_deref(), Some("Cut 2 of 3"));
+    assert_eq!(
+        selected(&editor, cx),
+        (DocPos::new(0, 17), DocPos::new(0, 24))
+    );
+}
+
+#[gpui::test]
+fn where_marks_touch_the_note_is_the_later_marks(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I think it is fine."]);
+    editor.update(cx, |e, _| {
+        let para_id = e.doc.paragraphs[0].id;
+        let mark = |range, note: &str| super::Mark {
+            para_id,
+            range,
+            check: Check::Hedges,
+            note: note.into(),
+        };
+        e.marks = vec![mark(0..7, "first"), mark(7..10, "second")];
+    });
+    let hint_at = |cx: &mut VisualTestContext, offset| {
+        editor.update(cx, |e, _| {
+            e.selection = Selection::caret(DocPos::new(0, offset))
+        });
+        editor.read_with(cx, |e, _| e.lab_bar().unwrap().hint)
+    };
+    assert_eq!(hint_at(cx, 0).as_deref(), Some("first"));
+    assert_eq!(hint_at(cx, 7).as_deref(), Some("second"));
+    assert_eq!(hint_at(cx, 10), None);
+}

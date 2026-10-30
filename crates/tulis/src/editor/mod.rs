@@ -120,6 +120,9 @@ pub struct Editor {
     pub(crate) goal_x: Option<Pixels>,
     pub(crate) autoscroll: bool,
     pub(crate) is_selecting: bool,
+    /// Where a plain left click went down, and the selection it made. On mouse-up without a
+    /// drag it toggles a trim cut there.
+    pub(crate) click_at: Option<(DocPos, Selection)>,
     pub(crate) register: String,
     pub(crate) register_linewise: bool,
     pub(crate) history: History<Snapshot, OverflowOp>,
@@ -171,6 +174,7 @@ impl Editor {
             goal_x: None,
             autoscroll: true,
             is_selecting: false,
+            click_at: None,
             register: String::new(),
             register_linewise: false,
             history: History::new(HISTORY_LIMIT),

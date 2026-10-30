@@ -833,7 +833,8 @@ impl Editor {
     }
 
     /// A click (or Enter) at `pos`: keep the active cut there, or make a kept one active
-    /// again. Returns false when there is no cut at `pos`.
+    /// again. A cut holds the offsets from its start up to, not including, its end. Returns
+    /// false when there is no cut at `pos`, or during a walk (which decides the cuts itself).
     pub(crate) fn toggle_cut_at(&mut self, pos: DocPos, cx: &mut Context<Self>) -> bool {
         let Some(id) = self.doc.paragraphs.get(pos.para).map(|p| p.id) else {
             return false;
@@ -841,9 +842,13 @@ impl Editor {
         let Some(preview) = &mut self.trim_preview else {
             return false;
         };
-        let hit = preview.cuts.iter().position(|cut| {
-            cut.para_id == id && cut.range.start <= pos.offset && pos.offset <= cut.range.end
-        });
+        if preview.walk.is_some() {
+            return false;
+        }
+        let hit = preview
+            .cuts
+            .iter()
+            .position(|cut| cut.para_id == id && cut.range.contains(&pos.offset));
         let Some(ix) = hit else {
             return false;
         };
@@ -854,12 +859,15 @@ impl Editor {
         true
     }
 
-    /// The mark under `pos` (edges included), as an index into `marks`.
+    /// The mark under `pos` (from its start up to, not including, its end), as an index into
+    /// `marks`. Where marks overlap, the one starting at `pos` wins.
     pub(crate) fn mark_at(&self, pos: DocPos) -> Option<usize> {
         let id = self.doc.paragraphs.get(pos.para)?.id;
-        self.marks.iter().position(|m| {
-            m.para_id == id && m.range.start <= pos.offset && pos.offset <= m.range.end
-        })
+        let under = |m: &Mark| m.para_id == id && m.range.contains(&pos.offset);
+        self.marks
+            .iter()
+            .position(|m| under(m) && m.range.start == pos.offset)
+            .or_else(|| self.marks.iter().position(under))
     }
 
     /// The marks in paragraph `id` (drawn tinted).
