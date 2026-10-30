@@ -31,6 +31,12 @@ impl Editor {
         let was_line = vim.mode() == Mode::VisualLine;
         let commands = vim.feed(key);
         for command in commands {
+            if was_line && command == VimCommand::Stash {
+                // Whole paragraphs leave the page, as with `Vd`.
+                let range = self.selection.range();
+                self.stash_paragraphs(range.start.para..range.end.para + 1, cx);
+                continue;
+            }
             if was_line && is_selection_command(command) {
                 self.select_whole_paragraphs();
             } else if was_visual && is_selection_command(command) {

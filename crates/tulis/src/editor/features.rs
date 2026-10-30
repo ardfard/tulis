@@ -11,6 +11,9 @@ use tulis_core::{DocPos, Selection};
 use super::{AltEdit, CycledGroup, Editor, TrimSuggestion};
 use crate::actions::*;
 
+const STASHED: &str = "Stashed to Overflow";
+const NOTHING_TO_STASH: &str = "Nothing to move to overflow";
+
 impl Editor {
     /// The selection within one paragraph, or the cursor's whole paragraph when nothing is selected.
     pub(crate) fn target_range(&self) -> Result<(usize, Range<usize>), OpError> {
@@ -162,6 +165,8 @@ impl Editor {
         self.toggle_ghost_here(cx);
     }
 
+    /// Ctrl+Shift+X, `gs`, the menu: stash the selection, or the cursor's paragraph, in
+    /// Overflow. The panel stays as it is.
     pub(super) fn send_to_overflow(
         &mut self,
         _: &SendToOverflow,
@@ -170,24 +175,34 @@ impl Editor {
     ) {
         self.finish_alt_edit();
         let sel = self.selection.range();
-        let whole = sel.start == sel.end;
-        let text = if whole {
-            self.doc.paragraphs[sel.start.para].export_text()
-        } else {
-            self.doc.export_text_in(sel.clone())
-        };
-        if text.trim().is_empty() {
-            return self.set_notice("Nothing to move to overflow", cx);
+        if sel.start == sel.end {
+            return self.stash_paragraphs(sel.start.para..sel.start.para + 1, cx);
+        }
+        if self.doc.export_text_in(sel.clone()).trim().is_empty() {
+            return self.set_notice(NOTHING_TO_STASH, cx);
         }
         self.begin_edit(EditKind::Other, sel.start.para..sel.end.para + 1);
         self.doc.stash(sel.clone());
-        self.selection = if whole {
-            let para = sel.start.para.min(self.doc.paragraphs.len() - 1);
-            Selection::caret(DocPos::new(para, 0))
-        } else {
-            Selection::caret(sel.start)
-        };
+        self.selection = Selection::caret(sel.start);
         self.end_edit(cx);
+        self.set_notice(STASHED, cx);
+    }
+
+    /// Stash whole paragraphs, removing them from the page (no selection, or vim `Vgs`).
+    pub(crate) fn stash_paragraphs(&mut self, paras: Range<usize>, cx: &mut Context<Self>) {
+        self.finish_alt_edit();
+        let blank = self.doc.paragraphs[paras.clone()]
+            .iter()
+            .all(|p| p.export_text().trim().is_empty());
+        if blank {
+            return self.set_notice(NOTHING_TO_STASH, cx);
+        }
+        self.begin_edit(EditKind::Other, paras.clone());
+        self.doc.stash_paragraphs(paras.clone());
+        let para = paras.start.min(self.doc.paragraphs.len() - 1);
+        self.selection = Selection::caret(DocPos::new(para, 0));
+        self.end_edit(cx);
+        self.set_notice(STASHED, cx);
     }
 
     /// Accept the trim suggestion under the cursor (or the next one, or the first) by ghosting it.

@@ -257,6 +257,10 @@ fn stashing_the_paragraph_appends_it_and_undo_takes_it_back(cx: &mut TestAppCont
         editor.read_with(cx, |e, _| e.doc.overflow.clone()),
         "older\n\na"
     );
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.last_notice().map(str::to_string)),
+        Some("Stashed to Overflow".into())
+    );
     editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
     assert_eq!(texts(&editor, cx), vec!["a", "b"]);
     assert_eq!(editor.read_with(cx, |e, _| e.doc.overflow.clone()), "older");
@@ -1399,6 +1403,8 @@ fn visual_line_g_commands_act_on_whole_paragraphs(cx: &mut TestAppContext) {
         editor.read_with(cx, |e, _| e.doc.overflow.clone()),
         "Stash this paragraph."
     );
+    // Like `Vd`, the paragraph goes too.
+    assert_eq!(texts(&editor, cx), vec!["Keep."]);
     assert_eq!(
         editor.read_with(cx, |e, _| e.vim_mode()),
         Some(Mode::Normal)
@@ -1417,4 +1423,32 @@ fn visual_line_g_commands_act_on_whole_paragraphs(cx: &mut TestAppContext) {
     type_str(&editor, cx, "Vga");
     let session = editor.read_with(cx, |e, _| e.alt_session.clone()).unwrap();
     assert_eq!((session.selection, session.range), (true, 0..10));
+}
+
+#[gpui::test]
+fn visual_line_stash_removes_the_paragraphs_like_visual_line_delete(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["One.", "Two.", "Three."]);
+    type_str(&editor, cx, "Vjd");
+    let deleted = texts(&editor, cx);
+    assert_eq!(deleted, vec!["Three."]);
+
+    let (editor, cx) = vim_editor(cx, &["One.", "Two.", "Three."]);
+    type_str(&editor, cx, "Vjgs");
+    assert_eq!(texts(&editor, cx), deleted);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.overflow.clone()),
+        "One.\nTwo."
+    );
+    assert_eq!(
+        editor.read_with(cx, |e, _| (e.cursor(), e.vim_mode())),
+        (DocPos::new(0, 0), Some(Mode::Normal))
+    );
+    type_str(&editor, cx, "u");
+    assert_eq!(texts(&editor, cx), vec!["One.", "Two.", "Three."]);
+    assert_eq!(editor.read_with(cx, |e, _| e.doc.overflow.clone()), "");
+
+    // The last paragraph: the page keeps one empty paragraph.
+    let (editor, cx) = vim_editor(cx, &["Only."]);
+    type_str(&editor, cx, "Vgs");
+    assert_eq!(texts(&editor, cx), vec![""]);
 }

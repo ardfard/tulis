@@ -813,6 +813,8 @@ mod tests {
         cx.simulate_keystrokes("secondary-shift-x");
         let stashed = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.overflow.clone());
         assert_eq!(stashed, "two");
+        // Stashing doesn't open the panel.
+        assert!(!ws.read_with(cx, |ws, _| ws.show_overflow));
     }
 
     /// A workspace in a `Root` window (tabs and inputs need it), with the page focused.
