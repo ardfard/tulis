@@ -19,6 +19,7 @@ use crate::actions::{
 };
 use crate::editor::{Editor, EditorEvent, GUTTER};
 use crate::header_dim::HeaderDim;
+use crate::scratchpad::OverflowDrag;
 use crate::theme;
 
 pub struct Workspace {
@@ -260,6 +261,7 @@ impl Workspace {
         let (scroll, background) = (editor.scroll.clone(), editor.theme.background);
         let page_focus = editor.focus_handle(cx);
         let menu_editor = self.editor.clone();
+        let (drop_editor, drop_focus) = (self.editor.clone(), page_focus.clone());
         div()
             .id("page")
             .relative()
@@ -289,6 +291,16 @@ impl Workspace {
             )
             .child(edge_fade(true, background))
             .child(edge_fade(false, background))
+            // A scratchpad block dragged by its grip; Ctrl held copies it.
+            .on_drop(move |drag: &OverflowDrag, window, cx| {
+                let (at, copy) = (window.mouse_position(), window.modifiers().secondary(cx));
+                let used = drop_editor.update(cx, |e, cx| {
+                    e.drop_overflow(drag.range.clone(), &drag.text, at, copy, cx)
+                });
+                if used {
+                    window.focus(&drop_focus, cx);
+                }
+            })
             // The editor's own right-click handler runs first and picks the target.
             .context_menu(move |menu, _, cx| {
                 let ghost = menu_editor.read(cx).ghost_menu_label();
@@ -961,6 +973,48 @@ mod tests {
         cx.run_until_parked();
         assert!(ws.read_with(cx, |ws, _| ws.show_overflow));
         assert!(scratchpad_focused(&ws, cx));
+    }
+
+    #[gpui::test]
+    fn dragging_a_grip_onto_the_page_moves_the_block_there(cx: &mut TestAppContext) {
+        use gpui::{Modifiers, MouseButton, point, px};
+
+        let (ws, cx) = root_workspace(cx, &["Page text."]);
+        cx.simulate_resize(gpui::size(px(1000.), px(700.)));
+        ws.update(cx, |ws, cx| {
+            ws.editor
+                .update(cx, |e, _| e.doc.overflow = "Dragged.\n\nStays.".into())
+        });
+        cx.simulate_keystrokes("secondary-\\");
+        cx.run_until_parked();
+        let pad = ws.read_with(cx, |ws, _| ws.scratchpad.clone().unwrap());
+        let grips = pad.read_with(cx, |pad, cx| pad.grips(cx));
+        assert_eq!(
+            grips.iter().map(|g| g.range.clone()).collect::<Vec<_>>(),
+            vec![0..8, 10..16]
+        );
+        // Hovering a block shows its grip.
+        let grip = grips[0].clone();
+        let over_text = point(grip.left + px(60.), grip.top + px(4.));
+        cx.simulate_mouse_move(over_text, None, Modifiers::none());
+        assert_eq!(pad.read_with(cx, |pad, _| pad.hovered.clone()), Some(0..8));
+        let target = ws.read_with(cx, |ws, cx| {
+            let layout = ws.editor.read(cx).layout.as_ref().expect("painted");
+            let p = layout.window_point(DocPos::new(0, 5)).unwrap();
+            point(p.x + px(1.), p.y + layout.line_height / 2.)
+        });
+        let on_grip = point(grip.left + px(4.), grip.top + px(6.));
+        cx.simulate_mouse_down(on_grip, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(target, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(target, MouseButton::Left, Modifiers::none());
+        cx.run_until_parked();
+        let (page, overflow) = ws.read_with(cx, |ws, cx| {
+            let e = ws.editor.read(cx);
+            (e.doc.paragraphs[0].text(), e.doc.overflow.clone())
+        });
+        assert_eq!(page, "Page Dragged.text.");
+        assert_eq!(overflow, "Stays.");
+        assert!(page_focused(&ws, cx));
     }
 
     fn sidebar_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {

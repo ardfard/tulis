@@ -3,7 +3,7 @@
 use std::ops::Range;
 use std::time::Instant;
 
-use gpui::{Context, Window};
+use gpui::{Context, Pixels, Point, Window};
 use tulis_core::alternates::{AltLevel, OpError};
 use tulis_core::history::EditKind;
 use tulis_core::{DocPos, Selection};
@@ -246,6 +246,27 @@ impl Editor {
         }
         cx.notify();
         true
+    }
+
+    /// A scratchpad block dropped on the page at window `point`: it goes in at the position under
+    /// the pointer, moved, or copied with `copy`. `range` and `text` are what the grip dragged;
+    /// if the scratchpad changed there since, nothing happens.
+    pub fn drop_overflow(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        point: Point<Pixels>,
+        copy: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.doc.overflow.get(range.clone()) != Some(text) {
+            return false;
+        }
+        let Some(layout) = self.current_layout() else {
+            return false;
+        };
+        let at = layout.pos_for_window_point(point);
+        self.use_overflow(range, at, copy, cx)
     }
 
     /// Ctrl+Enter in the scratchpad: its selection (a byte range of `doc.overflow`) or, with

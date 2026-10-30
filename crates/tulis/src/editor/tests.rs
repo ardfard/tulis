@@ -342,6 +342,49 @@ fn using_overflow_on_a_blank_line_does_nothing(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn dropping_a_block_puts_it_where_it_lands(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["One two.", "Three."]);
+    editor.update(cx, |e, _| e.doc.overflow = "Block.\n\nOther.".into());
+    cx.run_until_parked();
+    let point = editor.read_with(cx, |e, _| {
+        let layout = e.layout.as_ref().expect("painted");
+        let p = layout.window_point(DocPos::new(0, 4)).unwrap();
+        gpui::point(p.x + gpui::px(1.), p.y + layout.line_height / 2.)
+    });
+    let overflow = |cx: &mut VisualTestContext| editor.read_with(cx, |e, _| e.doc.overflow.clone());
+    // The scratchpad changed under the drag: nothing happens.
+    assert!(!editor.update(cx, |e, cx| e.drop_overflow(
+        0..6,
+        "Blocks",
+        point,
+        false,
+        cx
+    )));
+    assert!(editor.update(cx, |e, cx| e.drop_overflow(
+        0..6,
+        "Block.",
+        point,
+        false,
+        cx
+    )));
+    assert_eq!(texts(&editor, cx), vec!["One Block.two.", "Three."]);
+    assert_eq!(overflow(cx), "Other.");
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["One two.", "Three."]);
+    assert_eq!(overflow(cx), "Block.\n\nOther.");
+    // Ctrl held while dropping: a copy.
+    assert!(editor.update(cx, |e, cx| e.drop_overflow(
+        8..14,
+        "Other.",
+        point,
+        true,
+        cx
+    )));
+    assert_eq!(texts(&editor, cx), vec!["One Other.two.", "Three."]);
+    assert_eq!(overflow(cx), "Block.\n\nOther.");
+}
+
+#[gpui::test]
 fn accepting_a_trim_ghosts_it_and_escape_dismisses(cx: &mut TestAppContext) {
     let (editor, cx) = editor_with(cx, &["I really love tea, really."]);
     editor.update(cx, |e, _| {
