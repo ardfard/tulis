@@ -240,7 +240,7 @@ impl Editor {
                 let p = &self.doc.paragraphs[i];
                 let export = p.export_text();
                 (!export.trim().is_empty())
-                    .then(|| (p.id, p.text(), prompts::trim_request(&export)))
+                    .then(|| (p.id, p.text(), prompts::trim_request(&export, 10)))
             })
             .collect();
         if jobs.is_empty() {
