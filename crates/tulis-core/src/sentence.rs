@@ -1,4 +1,9 @@
 //! Sentence detection over a paragraph's text, for sentence-scope alternates and the Lab.
+//!
+//! A simple heuristic, with known gaps (pinned by the tests below):
+//! - a sentence that ends in a listed abbreviation ("… etc. Next") runs on into the next one;
+//! - an unlisted dotted abbreviation ends a sentence: "The U.S. economy" splits after "U.S.";
+//! - only `.`, `!` and `?` end sentences, so CJK `。`, `！` and `？` don't.
 
 use std::ops::Range;
 
@@ -132,6 +137,22 @@ mod tests {
             sentences("See (e.g. this) now."),
             vec!["See (e.g. this) now."]
         );
+    }
+
+    #[test]
+    fn known_gaps() {
+        // A sentence ending in a listed abbreviation doesn't end there.
+        assert_eq!(
+            sentences("Bring tea, cups, etc. Then sit."),
+            vec!["Bring tea, cups, etc. Then sit."]
+        );
+        // An unlisted dotted abbreviation ends a sentence.
+        assert_eq!(
+            sentences("The U.S. economy grew."),
+            vec!["The U.S.", "economy grew."]
+        );
+        // CJK full stops are not terminators.
+        assert_eq!(sentences("你好。再见。"), vec!["你好。再见。"]);
     }
 
     #[test]
