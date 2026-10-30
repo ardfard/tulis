@@ -111,6 +111,11 @@ impl AltSidebar {
             .update(cx, |e, cx| e.remove_alternate(index, cx));
     }
 
+    /// Focus is in the sidebar: its list or its text field.
+    pub(crate) fn has_focus(&self, window: &Window, cx: &App) -> bool {
+        self.list_focus.is_focused(window) || self.input.focus_handle(cx).is_focused(window)
+    }
+
     fn highlight(&self, cx: &App) -> usize {
         self.editor
             .read(cx)
@@ -243,13 +248,20 @@ impl Workspace {
             .get_or_insert_with(|| cx.new(|cx| AltSidebar::new(editor, window, cx)))
             .clone();
         let focus = sidebar.read(cx).list_focus.clone();
+        let handles = vec![focus.clone(), sidebar.read(cx).input.focus_handle(cx)];
+        self.editor.update(cx, |e, _| e.sidebar_focus = handles);
         window.focus(&focus, cx);
         cx.notify();
     }
 
-    /// The sidebar closed (Esc, or its target disappeared): the page gets focus back.
+    /// The sidebar closed (Esc, or its target disappeared): if focus was in it, the page gets
+    /// it back.
     pub(crate) fn alternates_closed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.preview {
+        let had_focus = self
+            .alt_sidebar
+            .as_ref()
+            .is_some_and(|s| s.read(cx).has_focus(window, cx));
+        if had_focus && !self.preview {
             self.focus_editor(window, cx);
         }
         cx.notify();

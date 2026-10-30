@@ -253,7 +253,9 @@ impl Editor {
         }
     }
 
-    /// Esc: cancel AI, else dismiss trims, else stop editing an alternate.
+    /// Esc: cancel AI, else dismiss trims, else stop editing an alternate (and leave vim's
+    /// Insert or Visual mode, or drop its pending keys). With none of that to do, close an open
+    /// sidebar.
     pub(super) fn cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
         if self.ai_task.take().is_some() {
             return self.set_notice("AI request cancelled", cx);
@@ -262,9 +264,17 @@ impl Editor {
             self.trims.clear();
             return self.set_notice("Trim suggestions dismissed", cx);
         }
+        let idle = self.alt_edit.is_none()
+            && self
+                .vim
+                .as_ref()
+                .is_none_or(|v| v.mode() == tulis_core::vim::Mode::Normal && !v.is_pending());
         self.finish_alt_edit();
         if self.vim.is_some() {
             self.vim_key(tulis_core::vim::VimKey::Escape, window, cx);
+        }
+        if idle {
+            self.close_alternates(cx);
         }
         cx.notify();
     }

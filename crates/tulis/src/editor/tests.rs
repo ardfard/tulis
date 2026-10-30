@@ -1076,7 +1076,7 @@ fn the_page_dims_except_the_target_paragraph_while_the_sidebar_is_open(cx: &mut 
             e.doc
                 .paragraphs
                 .iter()
-                .map(|p| paragraph_alpha(e, p.id))
+                .map(|p| paragraph_alpha(e, p.id, true))
                 .collect::<Vec<_>>()
         })
     };
@@ -1325,4 +1325,67 @@ fn previewing_versions_while_ai_works_still_adds_its_versions(cx: &mut TestAppCo
     cx.run_until_parked();
     assert_eq!(texts(&editor, cx), vec!["Draft three."]);
     assert_eq!(rows(&editor, cx).len(), 3);
+}
+
+#[gpui::test]
+fn escape_on_the_page_closes_the_sidebar_when_nothing_else_is_pending(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    let open = |cx: &mut VisualTestContext| editor.read_with(cx, |e, _| e.alt_session.is_some());
+    let escape = |cx: &mut VisualTestContext| {
+        editor.update_in(cx, |e, window, cx| e.cancel(&Cancel, window, cx))
+    };
+    select(&editor, cx, DocPos::new(0, 3), DocPos::new(0, 3));
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    escape(cx);
+    assert!(!open(cx));
+    // Trim suggestions are dismissed first.
+    editor.update(cx, |e, cx| {
+        let para_id = e.doc.paragraphs[0].id;
+        e.trims = vec![TrimSuggestion {
+            para_id,
+            range: 0..1,
+        }];
+        e.open_alternates(None, cx);
+    });
+    escape(cx);
+    assert!(open(cx));
+    escape(cx);
+    assert!(!open(cx));
+    // So is editing an alternate.
+    editor.update(cx, |e, cx| {
+        e.open_alternates(Some(Scope::Paragraph), cx);
+        e.alt_edit = Some(AltEdit {
+            para_id: e.doc.paragraphs[0].id,
+            start: 2,
+        });
+    });
+    escape(cx);
+    assert!(open(cx));
+    escape(cx);
+    assert!(!open(cx));
+}
+
+#[gpui::test]
+fn vim_escape_closes_the_sidebar_only_from_idle_normal_mode(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["I love tea"]);
+    let open = |cx: &mut VisualTestContext| editor.read_with(cx, |e, _| e.alt_session.is_some());
+    let escape = |cx: &mut VisualTestContext| {
+        editor.update_in(cx, |e, window, cx| e.cancel(&Cancel, window, cx))
+    };
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    type_str(&editor, cx, "i");
+    escape(cx); // Insert → Normal
+    assert!(open(cx));
+    type_str(&editor, cx, "v");
+    escape(cx); // Visual → Normal
+    assert!(open(cx));
+    type_str(&editor, cx, "g");
+    escape(cx); // drops the pending `g`
+    assert!(open(cx));
+    escape(cx);
+    assert!(!open(cx));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.vim_mode()),
+        Some(Mode::Normal)
+    );
 }

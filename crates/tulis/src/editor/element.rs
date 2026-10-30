@@ -41,13 +41,14 @@ impl IntoElement for EditorElement {
 /// Horizontal space kept free on each side of the text, for the paragraph-version bar.
 pub(crate) const GUTTER: Pixels = px(24.);
 
-/// Text alpha of the paragraphs around the alternates sidebar's target while it is open.
+/// Text alpha of the paragraphs around the alternates sidebar's target while it has focus.
 pub(crate) const DIM_ALPHA: f32 = 0.35;
 
-/// The alpha factor for paragraph `id`'s text: dimmed while the sidebar targets another one.
-pub(crate) fn paragraph_alpha(editor: &Editor, id: ParaId) -> f32 {
+/// The alpha factor for paragraph `id`'s text: dimmed while the page is (`Editor::page_dimmed`)
+/// and the sidebar targets another paragraph.
+pub(crate) fn paragraph_alpha(editor: &Editor, id: ParaId, page_dimmed: bool) -> f32 {
     match &editor.alt_session {
-        Some(session) if session.para_id != id => DIM_ALPHA,
+        Some(session) if page_dimmed && session.para_id != id => DIM_ALPHA,
         _ => 1.,
     }
 }
@@ -83,6 +84,7 @@ fn build_layout(
     };
     let style = style_with_alpha(1.);
     let dimmed = style_with_alpha(DIM_ALPHA);
+    let page_dimmed = editor.page_dimmed(window);
     let marked = editor.marked.clone().map(|r| {
         (
             editor.doc.pos_from_flat(r.start),
@@ -113,7 +115,7 @@ fn build_layout(
             marked_here,
             title_marker,
             caret_on_marker,
-            if paragraph_alpha(editor, p.id) < 1. {
+            if paragraph_alpha(editor, p.id, page_dimmed) < 1. {
                 &dimmed
             } else {
                 &style

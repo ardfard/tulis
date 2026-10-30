@@ -99,6 +99,8 @@ pub struct Editor {
     pub(crate) register: String,
     pub(crate) register_linewise: bool,
     pub(crate) history: History<Snapshot>,
+    /// The sidebar's focus handles (its list and text field), set by the workspace.
+    pub(crate) sidebar_focus: Vec<FocusHandle>,
     focus_handle: FocusHandle,
 }
 
@@ -140,6 +142,7 @@ impl Editor {
             register: String::new(),
             register_linewise: false,
             history: History::new(HISTORY_LIMIT),
+            sidebar_focus: Vec::new(),
             focus_handle: cx.focus_handle(),
         };
         if let Some(notice) = theme_notice {
@@ -222,6 +225,11 @@ impl Editor {
 
     pub fn vim_mode(&self) -> Option<Mode> {
         self.vim.as_ref().map(Vim::mode)
+    }
+
+    /// The page dims around the sidebar's target while focus is in the sidebar.
+    pub(crate) fn page_dimmed(&self, window: &Window) -> bool {
+        self.alt_session.is_some() && self.sidebar_focus.iter().any(|f| f.is_focused(window))
     }
 
     /// True when typed characters drive vim instead of being inserted.

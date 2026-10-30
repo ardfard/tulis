@@ -1068,6 +1068,43 @@ mod tests {
     }
 
     #[gpui::test]
+    fn the_page_dims_only_while_the_sidebar_has_focus(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["One.", "Two."]);
+        let dimmed = |cx: &mut gpui::VisualTestContext| {
+            ws.update_in(cx, |ws, window, cx| ws.editor.read(cx).page_dimmed(window))
+        };
+        assert!(!dimmed(cx));
+        cx.simulate_keystrokes("secondary-shift-a");
+        cx.run_until_parked();
+        assert!(dimmed(cx));
+        cx.simulate_keystrokes("i"); // the text field is in the sidebar too
+        assert!(dimmed(cx));
+        ws.update_in(cx, |ws, window, cx| ws.focus_editor(window, cx));
+        cx.run_until_parked();
+        assert!(ws.read_with(cx, |ws, cx| ws.editor.read(cx).alt_session.is_some()));
+        assert!(!dimmed(cx));
+    }
+
+    #[gpui::test]
+    fn closing_the_sidebar_leaves_focus_elsewhere_alone(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["I love tea"]);
+        cx.simulate_keystrokes("secondary-shift-a");
+        cx.run_until_parked();
+        ws.update_in(cx, |ws, window, cx| {
+            ws.show_cheat_sheet(&crate::actions::ShowCheatSheet, window, cx)
+        });
+        cx.run_until_parked();
+        ws.update(cx, |ws, cx| {
+            ws.editor.update(cx, |e, cx| e.close_alternates(cx))
+        });
+        cx.run_until_parked();
+        let page_focused = ws.update_in(cx, |ws, window, cx| {
+            gpui::Focusable::focus_handle(ws.editor.read(cx), cx).is_focused(window)
+        });
+        assert!(!page_focused);
+    }
+
+    #[gpui::test]
     fn toasts_stack_two_and_expire(cx: &mut TestAppContext) {
         init(cx);
         let (ws, cx) = cx.add_window_view(|window, cx| {

@@ -190,6 +190,11 @@ impl Vim {
         self.reset();
     }
 
+    /// A count, operator or prefix key (`g`, `]`, …) is waiting for more keys.
+    pub fn is_pending(&self) -> bool {
+        self.count.is_some() || self.op.is_some() || self.prefix.is_some()
+    }
+
     pub fn is_visual(&self) -> bool {
         matches!(self.mode, Mode::Visual | Mode::VisualLine)
     }
@@ -672,6 +677,23 @@ mod tests {
             assert_eq!(v.mode(), Mode::Normal);
         }
         assert_eq!(feed(&mut v, "dga"), vec![]);
+    }
+
+    #[test]
+    fn pending_keys_are_reported_until_escape_or_completion() {
+        let mut vim = Vim::new();
+        assert!(!vim.is_pending());
+        for keys in ["2", "d", "g", "]"] {
+            for c in keys.chars() {
+                vim.feed(VimKey::Char(c));
+            }
+            assert!(vim.is_pending(), "{keys}");
+            vim.feed(VimKey::Escape);
+            assert!(!vim.is_pending(), "{keys}");
+        }
+        vim.feed(VimKey::Char('g'));
+        vim.feed(VimKey::Char('h'));
+        assert!(!vim.is_pending());
     }
 
     #[test]
