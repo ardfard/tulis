@@ -10,6 +10,7 @@ use super::Editor;
 use super::layout::{LayoutCache, ParaLayout, clamp_px};
 use super::markers::{self, DOT};
 use crate::runs::{RunStyle, build_runs};
+use tulis_core::ParaId;
 use tulis_core::stats::title_marker_len;
 
 pub struct EditorElement {
@@ -40,6 +41,17 @@ impl IntoElement for EditorElement {
 /// Horizontal space kept free on each side of the text, for the paragraph-version bar.
 pub(crate) const GUTTER: Pixels = px(24.);
 
+/// Text alpha of the paragraphs around the alternates sidebar's target while it is open.
+pub(crate) const DIM_ALPHA: f32 = 0.35;
+
+/// The alpha factor for paragraph `id`'s text: dimmed while the sidebar targets another one.
+pub(crate) fn paragraph_alpha(editor: &Editor, id: ParaId) -> f32 {
+    match &editor.alt_session {
+        Some(session) if session.para_id != id => DIM_ALPHA,
+        _ => 1.,
+    }
+}
+
 pub(crate) fn line_height(editor: &Editor) -> Pixels {
     px(editor.config.editor.effective_font_size() * 1.8)
 }
@@ -55,18 +67,22 @@ fn build_layout(
     let lh = line_height(editor);
     let mut title_font = font(editor.font_family.clone());
     title_font.weight = FontWeight::BOLD;
-    let style = RunStyle {
-        font: font(editor.font_family.clone()),
-        title_font,
-        color: editor.theme.text,
-        trim: editor.theme.trim,
-        marker: {
-            let mut c = editor.theme.text_muted;
-            c.a *= 0.5;
+    let style_with_alpha = |alpha: f32| {
+        let faded = |mut c: gpui::Hsla, a: f32| {
+            c.a *= a;
             c
-        },
-        ghost_alpha: editor.theme.ghost_alpha,
+        };
+        RunStyle {
+            font: font(editor.font_family.clone()),
+            title_font: title_font.clone(),
+            color: faded(editor.theme.text, alpha),
+            trim: faded(editor.theme.trim, alpha),
+            marker: faded(editor.theme.text_muted, 0.5 * alpha),
+            ghost_alpha: editor.theme.ghost_alpha,
+        }
     };
+    let style = style_with_alpha(1.);
+    let dimmed = style_with_alpha(DIM_ALPHA);
     let marked = editor.marked.clone().map(|r| {
         (
             editor.doc.pos_from_flat(r.start),
@@ -97,7 +113,11 @@ fn build_layout(
             marked_here,
             title_marker,
             caret_on_marker,
-            &style,
+            if paragraph_alpha(editor, p.id) < 1. {
+                &dimmed
+            } else {
+                &style
+            },
         );
         let line = window
             .text_system()

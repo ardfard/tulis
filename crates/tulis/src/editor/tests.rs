@@ -699,11 +699,10 @@ fn cycling_boxes_the_group_until_the_cursor_leaves(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn clicking_the_version_handle_shows_the_next_version(cx: &mut TestAppContext) {
-    let (editor, cx) = editor_with(cx, &["Draft one."]);
-    editor.update_in(cx, |e, window, cx| {
-        e.make_alternate(&MakeAlternate, window, cx);
-        e.replace_text_in_range(None, " Two.", window, cx);
+fn clicking_the_version_handle_opens_the_paragraph_tab(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Intro.", "Draft one."]);
+    editor.update(cx, |e, _| {
+        e.doc.add_version(1, "Draft two.".into());
     });
     cx.simulate_resize(gpui::size(gpui::px(800.), gpui::px(600.)));
     cx.run_until_parked();
@@ -712,11 +711,17 @@ fn clicking_the_version_handle_shows_the_next_version(cx: &mut TestAppContext) {
         assert_eq!(layout.version_handles.len(), 1);
         layout.version_handles[0].1
     });
-    let before = editor.read_with(cx, |e, _| e.doc.paragraphs[0].active);
     cx.simulate_click(handle.center(), gpui::Modifiers::none());
-    let after = editor.read_with(cx, |e, _| e.doc.paragraphs[0].active);
-    assert_ne!(before, after);
-    assert!(editor.read_with(cx, |e, _| e.cycled.is_some()));
+    let session = editor.read_with(cx, |e, _| e.alt_session.clone()).unwrap();
+    assert_eq!(session.scope, Scope::Paragraph);
+    assert_eq!(
+        session.para_id,
+        editor.read_with(cx, |e, _| e.doc.paragraphs[1].id)
+    );
+    assert_eq!(
+        rows(&editor, cx),
+        vec![row("Draft one.", false), row("Draft two.", true)]
+    );
 }
 
 #[gpui::test]
@@ -1060,4 +1065,25 @@ fn asking_ai_from_the_sidebar_appends_ai_options_to_its_target(cx: &mut TestAppC
     assert_eq!(listed[0], row("I love tea.", false));
     assert_eq!(listed[1], ("Tea is love.".to_string(), true, true));
     assert_eq!(listed[2], ("I adore tea.".to_string(), false, true));
+}
+
+#[gpui::test]
+fn the_page_dims_except_the_target_paragraph_while_the_sidebar_is_open(cx: &mut TestAppContext) {
+    use super::element::{DIM_ALPHA, paragraph_alpha};
+    let (editor, cx) = editor_with(cx, &["One.", "Two."]);
+    let alphas = |cx: &mut VisualTestContext| {
+        editor.read_with(cx, |e, _| {
+            e.doc
+                .paragraphs
+                .iter()
+                .map(|p| paragraph_alpha(e, p.id))
+                .collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(alphas(cx), vec![1., 1.]);
+    select(&editor, cx, DocPos::new(1, 1), DocPos::new(1, 1));
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    assert_eq!(alphas(cx), vec![DIM_ALPHA, 1.]);
+    editor.update(cx, |e, cx| e.close_alternates(cx));
+    assert_eq!(alphas(cx), vec![1., 1.]);
 }

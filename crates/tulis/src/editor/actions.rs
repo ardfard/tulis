@@ -257,7 +257,8 @@ impl Editor {
         if let Some(para) = super::markers::handle_at(&layout.version_handles, event.position)
             && para < self.doc.paragraphs.len()
         {
-            self.next_version(para, cx);
+            self.set_selection(Selection::caret(DocPos::new(para, 0)), cx);
+            self.open_alternates(Some(super::Scope::Paragraph), cx);
             return;
         }
         let pos = self.doc.clamp(layout.pos_for_window_point(event.position));

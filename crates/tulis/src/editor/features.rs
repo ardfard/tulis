@@ -98,25 +98,6 @@ impl Editor {
         });
     }
 
-    /// Show the next version of paragraph `para` (a click on its `⋮` handle).
-    pub(crate) fn next_version(&mut self, para: usize, cx: &mut Context<Self>) {
-        self.finish_alt_edit();
-        let count = self.doc.paragraphs[para].versions.len();
-        if count < 2 {
-            return;
-        }
-        self.begin_edit(EditKind::Other, para..para + 1);
-        let p = &mut self.doc.paragraphs[para];
-        p.active = (p.active + 1) % count;
-        let (id, len) = (p.id, p.len());
-        self.selection = Selection::caret(DocPos::new(para, 0));
-        self.end_edit(cx);
-        self.cycled = Some(CycledGroup {
-            para_id: id,
-            range: 0..len,
-        });
-    }
-
     pub(super) fn cycle_next(&mut self, _: &CycleNext, _: &mut Window, cx: &mut Context<Self>) {
         self.cycle(true, cx);
     }
