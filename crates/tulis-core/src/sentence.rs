@@ -75,6 +75,19 @@ pub fn sentence_ranges(text: &str) -> Vec<Range<usize>> {
     out
 }
 
+/// The sentences of `text` with more than `max_words` whitespace-separated words, with their
+/// word counts (the Lab's "Mark sentences that run long" check).
+pub fn long_sentences(text: &str, max_words: usize) -> Vec<(Range<usize>, usize)> {
+    sentence_ranges(text)
+        .into_iter()
+        .map(|range| {
+            let words = text[range.clone()].split_whitespace().count();
+            (range, words)
+        })
+        .filter(|&(_, words)| words > max_words)
+        .collect()
+}
+
 /// The sentence at `offset`. An offset in the whitespace between two sentences belongs to the
 /// one before it; one before the first sentence belongs to the first. Blank text gives an empty
 /// range at `offset`.
@@ -98,6 +111,15 @@ mod tests {
             .into_iter()
             .map(|r| &text[r])
             .collect()
+    }
+
+    #[test]
+    fn long_sentences_are_those_over_the_limit() {
+        let text = "One two three. One two three four five! Short.";
+        assert_eq!(long_sentences(text, 3), vec![(15..39, 5)]);
+        assert!(long_sentences(text, 5).is_empty());
+        assert_eq!(long_sentences(text, 0).len(), 3);
+        assert!(long_sentences("", 0).is_empty());
     }
 
     #[test]

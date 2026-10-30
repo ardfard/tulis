@@ -70,6 +70,41 @@ pub fn document_counts(doc: &Document) -> Counts {
         .fold(Counts::default(), Counts::add)
 }
 
+/// The document's word count, as `document_counts` gives it, with `cuts` left out as well. Each
+/// cut is a paragraph index and a byte range of that paragraph's rendered text (the Lab's trim
+/// preview counts the words that would remain).
+pub fn words_without(doc: &Document, cuts: &[(usize, Range<usize>)]) -> usize {
+    doc.paragraphs
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let text = p.text();
+            let skip = if i == 0 { title_marker_len(&text) } else { 0 };
+            let ghosts: Vec<Range<usize>> = p
+                .spans()
+                .into_iter()
+                .filter(|s| s.ghost)
+                .map(|s| s.range)
+                .collect();
+            let cut_here: Vec<&Range<usize>> = cuts
+                .iter()
+                .filter(|(para, _)| *para == i)
+                .map(|(_, range)| range)
+                .collect();
+            let kept: String = text
+                .char_indices()
+                .filter(|(at, _)| {
+                    *at >= skip
+                        && !ghosts.iter().any(|g| g.contains(at))
+                        && !cut_here.iter().any(|c| c.contains(at))
+                })
+                .map(|(_, c)| c)
+                .collect();
+            Counts::of(&kept).words
+        })
+        .sum()
+}
+
 /// Counts for `range`. Ghosts and the title marker are left out.
 pub fn selection_counts(doc: &Document, range: Range<DocPos>) -> Counts {
     let mut start = range.start;
@@ -86,6 +121,17 @@ pub fn selection_counts(doc: &Document, range: Range<DocPos>) -> Counts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn words_without_leaves_out_cuts_ghosts_and_the_title_marker() {
+        let mut d = Document::from_texts(&["# My title", "I really love green tea.", "Cut me."]);
+        d.toggle_ghost(1, 14..20).unwrap(); // "green "
+        assert_eq!(document_counts(&d).words, 8);
+        assert_eq!(words_without(&d, &[]), 8);
+        assert_eq!(words_without(&d, &[(1, 2..9), (2, 0..7)]), 5);
+        // Part of a word leaves the rest of it.
+        assert_eq!(words_without(&d, &[(1, 3..5)]), 8);
+    }
 
     #[test]
     fn counts_words_and_chars() {
