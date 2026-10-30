@@ -28,9 +28,12 @@ impl Editor {
     pub(crate) fn vim_key(&mut self, key: VimKey, window: &mut Window, cx: &mut Context<Self>) {
         let Some(vim) = self.vim.as_mut() else { return };
         let was_visual = vim.is_visual();
+        let was_line = vim.mode() == Mode::VisualLine;
         let commands = vim.feed(key);
         for command in commands {
-            if was_visual && is_selection_command(command) {
+            if was_line && is_selection_command(command) {
+                self.select_whole_paragraphs();
+            } else if was_visual && is_selection_command(command) {
                 self.include_visual_end();
             }
             self.exec_vim(command, window, cx);
@@ -73,6 +76,16 @@ impl Editor {
         self.selection = Selection {
             anchor: range.start,
             head: self.next_in_para(range.end),
+        };
+    }
+
+    /// VisualLine mode selects whole paragraphs: make the selection cover them.
+    fn select_whole_paragraphs(&mut self) {
+        let range = self.selection.range();
+        let end = self.doc.paragraphs[range.end.para].len();
+        self.selection = Selection {
+            anchor: DocPos::new(range.start.para, 0),
+            head: DocPos::new(range.end.para, end),
         };
     }
 

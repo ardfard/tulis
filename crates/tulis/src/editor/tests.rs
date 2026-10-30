@@ -1389,3 +1389,32 @@ fn vim_escape_closes_the_sidebar_only_from_idle_normal_mode(cx: &mut TestAppCont
         Some(Mode::Normal)
     );
 }
+
+#[gpui::test]
+fn visual_line_g_commands_act_on_whole_paragraphs(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["Keep.", "Stash this paragraph."]);
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(1, 3)));
+    type_str(&editor, cx, "Vgs");
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.overflow[0].text.clone()),
+        "Stash this paragraph."
+    );
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.vim_mode()),
+        Some(Mode::Normal)
+    );
+
+    let (editor, cx) = vim_editor(cx, &["Hello world", "Next"]);
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 3)));
+    type_str(&editor, cx, "Vgh");
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.paragraphs[0].export_text()),
+        ""
+    );
+
+    let (editor, cx) = vim_editor(cx, &["I love tea"]);
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 3)));
+    type_str(&editor, cx, "Vga");
+    let session = editor.read_with(cx, |e, _| e.alt_session.clone()).unwrap();
+    assert_eq!((session.selection, session.range), (true, 0..10));
+}
