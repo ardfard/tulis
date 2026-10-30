@@ -1087,3 +1087,71 @@ fn the_page_dims_except_the_target_paragraph_while_the_sidebar_is_open(cx: &mut 
     editor.update(cx, |e, cx| e.close_alternates(cx));
     assert_eq!(alphas(cx), vec![1., 1.]);
 }
+
+#[gpui::test]
+fn right_click_targets_the_selection_or_the_word_under_the_pointer(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love green tea", ""]);
+    editor.update(cx, |e, cx| e.target_for_context_menu(DocPos::new(0, 8), cx));
+    let sel = editor.read_with(cx, |e, _| e.selection.range());
+    assert_eq!(sel, DocPos::new(0, 7)..DocPos::new(0, 12));
+    // An existing selection is kept.
+    select(&editor, cx, DocPos::new(0, 2), DocPos::new(0, 12));
+    editor.update(cx, |e, cx| {
+        e.target_for_context_menu(DocPos::new(0, 14), cx)
+    });
+    let sel = editor.read_with(cx, |e, _| e.selection.range());
+    assert_eq!(sel, DocPos::new(0, 2)..DocPos::new(0, 12));
+    // Just after a word, that word; with no word there, the cursor just moves.
+    select(&editor, cx, DocPos::new(0, 0), DocPos::new(0, 0));
+    editor.update(cx, |e, cx| e.target_for_context_menu(DocPos::new(0, 1), cx));
+    let sel = editor.read_with(cx, |e, _| e.selection.range());
+    assert_eq!(sel, DocPos::new(0, 0)..DocPos::new(0, 1));
+    select(&editor, cx, DocPos::new(0, 0), DocPos::new(0, 0));
+    editor.update(cx, |e, cx| e.target_for_context_menu(DocPos::new(1, 0), cx));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.selection),
+        Selection::caret(DocPos::new(1, 0))
+    );
+}
+
+#[gpui::test]
+fn context_menu_commands_act_on_the_word_and_the_ghost_label_follows(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love green tea"]);
+    editor.update(cx, |e, cx| e.target_for_context_menu(DocPos::new(0, 8), cx));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.ghost_menu_label()),
+        "Ghost it"
+    );
+    // Alternatives for selection.
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    let session = editor.read_with(cx, |e, _| e.alt_session.clone()).unwrap();
+    assert!(session.selection);
+    assert_eq!(rows(&editor, cx), vec![row("green", true)]);
+    editor.update(cx, |e, cx| e.close_alternates(cx));
+    // Ghost it, then the label reads Revive it.
+    editor.update(cx, |e, cx| e.toggle_ghost_here(cx));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.paragraphs[0].export_text()),
+        "I love  tea"
+    );
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.ghost_menu_label()),
+        "Revive it"
+    );
+    editor.update(cx, |e, cx| e.toggle_ghost_here(cx));
+    // AI alternatives for selection.
+    with_mock(&editor, cx, vec![r#"["verdant"]"#]);
+    editor.update(cx, |e, cx| e.ask_ai_alternates(cx));
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["I love verdant tea"]);
+    // Stash this in Overflow.
+    editor.update(cx, |e, cx| e.target_for_context_menu(DocPos::new(0, 3), cx));
+    editor.update_in(cx, |e, window, cx| {
+        e.send_to_overflow(&SendToOverflow, window, cx)
+    });
+    assert_eq!(texts(&editor, cx), vec!["I  verdant tea"]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.overflow[0].text.clone()),
+        "love"
+    );
+}

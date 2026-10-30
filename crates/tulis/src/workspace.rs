@@ -7,14 +7,15 @@ use gpui::{
     PathPromptOptions, PromptLevel, SharedString, Subscription, Task, Window, div,
     linear_color_stop, linear_gradient, prelude::*, px,
 };
+use gpui_component::menu::ContextMenuExt;
 use gpui_component::text::TextView;
 use tulis_core::config::Config;
 use tulis_core::storage;
 use tulis_core::{Document, OverflowId};
 
 use crate::actions::{
-    CycleTheme, New, Open, OpenLab, Quit, Save, SaveAs, ToggleMarkers, ToggleOverflowPanel,
-    TogglePreview,
+    AiAlternates, CycleTheme, New, Open, OpenAlternates, OpenLab, Quit, Save, SaveAs,
+    SendToOverflow, ToggleGhost, ToggleMarkers, ToggleOverflowPanel, TogglePreview,
 };
 use crate::editor::{Editor, EditorEvent, GUTTER};
 use crate::header_dim::HeaderDim;
@@ -349,7 +350,10 @@ impl Workspace {
     fn render_page(&self, cx: &App) -> impl IntoElement {
         let editor = self.editor.read(cx);
         let (scroll, background) = (editor.scroll.clone(), editor.theme.background);
+        let page_focus = editor.focus_handle(cx);
+        let menu_editor = self.editor.clone();
         div()
+            .id("page")
             .relative()
             .flex_1()
             .min_w(px(0.))
@@ -377,6 +381,15 @@ impl Workspace {
             )
             .child(edge_fade(true, background))
             .child(edge_fade(false, background))
+            // The editor's own right-click handler runs first and picks the target.
+            .context_menu(move |menu, _, cx| {
+                let ghost = menu_editor.read(cx).ghost_menu_label();
+                menu.action_context(page_focus.clone())
+                    .menu("Alternatives for selection", Box::new(OpenAlternates))
+                    .menu("AI alternatives for selection", Box::new(AiAlternates))
+                    .menu(ghost, Box::new(ToggleGhost))
+                    .menu("Stash this in Overflow", Box::new(SendToOverflow))
+            })
     }
 }
 
@@ -952,6 +965,29 @@ mod tests {
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
         assert!(ws.read_with(cx, |ws, cx| ws.editor.read(cx).alt_session.is_none()));
+    }
+
+    #[gpui::test]
+    fn right_click_menu_opens_the_sidebar_on_the_word(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["I love green tea"]);
+        cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(700.)));
+        cx.run_until_parked();
+        let point = ws.read_with(cx, |ws, cx| {
+            let layout = ws.editor.read(cx).layout.as_ref().expect("painted");
+            let p = layout.window_point(DocPos::new(0, 8)).unwrap();
+            gpui::point(p.x + gpui::px(2.), p.y + layout.line_height / 2.)
+        });
+        cx.simulate_mouse_down(point, gpui::MouseButton::Right, gpui::Modifiers::none());
+        cx.simulate_mouse_up(point, gpui::MouseButton::Right, gpui::Modifiers::none());
+        cx.run_until_parked();
+        let sel = ws.read_with(cx, |ws, cx| ws.editor.read(cx).selection.range());
+        assert_eq!(sel, DocPos::new(0, 7)..DocPos::new(0, 12));
+        // First item: Alternatives for selection.
+        cx.simulate_keystrokes("down enter");
+        cx.run_until_parked();
+        let session = ws.read_with(cx, |ws, cx| ws.editor.read(cx).alt_session.clone());
+        assert_eq!(session.map(|s| s.range), Some(7..12));
+        assert!(sidebar_focused(&ws, cx));
     }
 
     #[gpui::test]

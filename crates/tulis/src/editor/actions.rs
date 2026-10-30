@@ -285,6 +285,64 @@ impl Editor {
         }
     }
 
+    /// Right-click (before the context menu opens): keep a selection; otherwise select the group
+    /// or word under the pointer, so the menu's commands act on it.
+    pub(super) fn on_right_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.focus_handle, cx);
+        let Some(layout) = self.layout.as_ref() else {
+            return;
+        };
+        let pos = self.doc.clamp(layout.pos_for_window_point(event.position));
+        self.target_for_context_menu(pos, cx);
+    }
+
+    pub(crate) fn target_for_context_menu(&mut self, pos: DocPos, cx: &mut Context<Self>) {
+        self.finish_alt_edit();
+        if !self.selection.is_empty() {
+            return;
+        }
+        let range = self.scope_range(
+            pos.para,
+            super::Scope::Word,
+            &(pos.offset..pos.offset),
+            false,
+        );
+        let text = self.doc.paragraphs[pos.para].text();
+        let selection = if text[range.clone()].trim().is_empty() {
+            Selection::caret(pos)
+        } else {
+            Selection {
+                anchor: DocPos::new(pos.para, range.start),
+                head: DocPos::new(pos.para, range.end),
+            }
+        };
+        self.set_selection(selection, cx);
+    }
+
+    /// The context menu's ghost item: "Revive it" when its target is entirely ghosted.
+    pub fn ghost_menu_label(&self) -> &'static str {
+        let Ok((para, range)) = self.target_range() else {
+            return "Ghost it";
+        };
+        let p = &self.doc.paragraphs[para];
+        let range = p.expand_to_alt_boundaries(range);
+        let spans: Vec<_> = p
+            .spans()
+            .into_iter()
+            .filter(|s| s.range.start < range.end && range.start < s.range.end)
+            .collect();
+        if !spans.is_empty() && spans.iter().all(|s| s.ghost) {
+            "Revive it"
+        } else {
+            "Ghost it"
+        }
+    }
+
     pub(super) fn on_mouse_move(
         &mut self,
         event: &MouseMoveEvent,
