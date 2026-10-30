@@ -27,6 +27,8 @@ pub struct Workspace {
     pub(crate) keep_in_overflow: bool,
     pub(crate) banner: Option<String>,
     pub(crate) cheat_sheet: Option<Entity<crate::cheat_sheet::CheatSheet>>,
+    /// The alternates sidebar's view, created the first time it opens.
+    pub(crate) alt_sidebar: Option<Entity<crate::sidebar::AltSidebar>>,
     pub(crate) preview: bool,
     preview_focus: FocusHandle,
     pub(crate) header_dim: HeaderDim,
@@ -51,12 +53,17 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(|cx| Editor::new(config, Document::new(), cx));
-        let subscriptions = vec![
-            cx.observe(&editor, |_, _, cx| cx.notify()),
-            cx.subscribe(&editor, |ws, _, event: &EditorEvent, cx| match event {
-                EditorEvent::Typed => ws.typed(cx),
-            }),
-        ];
+        let subscriptions =
+            vec![
+                cx.observe(&editor, |_, _, cx| cx.notify()),
+                cx.subscribe_in(&editor, window, |ws, _, event: &EditorEvent, window, cx| {
+                    match event {
+                        EditorEvent::Typed => ws.typed(cx),
+                        EditorEvent::AlternatesOpened => ws.alternates_opened(window, cx),
+                        EditorEvent::AlternatesClosed => ws.alternates_closed(window, cx),
+                    }
+                }),
+            ];
         let initial_theme = editor.read(cx).theme;
         theme::apply_to_components(&initial_theme, cx);
         let mut workspace = Self {
@@ -66,6 +73,7 @@ impl Workspace {
             keep_in_overflow: false,
             banner: None,
             cheat_sheet: None,
+            alt_sidebar: None,
             preview: false,
             preview_focus: cx.focus_handle(),
             header_dim: HeaderDim::default(),
@@ -413,6 +421,9 @@ impl Render for Workspace {
                     .min_h(px(0.))
                     .flex()
                     .flex_row()
+                    .when(self.editor.read(cx).alt_session.is_some(), |row| {
+                        row.children(self.alt_sidebar.clone())
+                    })
                     .child(self.render_main(cx))
                     .when(self.show_overflow, |row| {
                         row.child(self.render_overflow(cx))
@@ -835,6 +846,48 @@ mod tests {
         cx.simulate_keystrokes("secondary-shift-x");
         let stashed = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.overflow.len());
         assert_eq!(stashed, 1);
+    }
+
+    /// A workspace in a `Root` window (tabs and inputs need it), with the page focused.
+    fn root_workspace<'a>(
+        cx: &'a mut TestAppContext,
+        texts: &[&str],
+    ) -> (gpui::Entity<Workspace>, &'a mut gpui::VisualTestContext) {
+        use gpui::AppContext as _;
+        init(cx);
+        let doc = tulis_core::Document::from_texts(texts);
+        let (root, cx) = cx.add_window_view(|window, cx| {
+            let ws = cx.new(|cx| Workspace::new(Config::default(), None, None, window, cx));
+            ws.update(cx, |ws, cx| ws.editor.update(cx, |e, cx| e.load(doc, cx)));
+            gpui_component::Root::new(ws, window, cx)
+        });
+        let ws = root.read_with(cx, |root, _| {
+            root.view().clone().downcast::<Workspace>().unwrap()
+        });
+        ws.update_in(cx, |ws, window, cx| ws.focus_editor(window, cx));
+        cx.run_until_parked();
+        (ws, cx)
+    }
+
+    fn sidebar_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {
+        let sidebar = ws.read_with(cx, |ws, _| ws.alt_sidebar.clone());
+        sidebar.is_some_and(|s| cx.update(|window, cx| s.read(cx).list_focus.is_focused(window)))
+    }
+
+    #[gpui::test]
+    fn ctrl_shift_a_opens_the_sidebar_and_escape_closes_it(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["I love tea"]);
+        cx.simulate_keystrokes("secondary-shift-a");
+        cx.run_until_parked();
+        assert!(sidebar_focused(&ws, cx));
+        assert!(ws.read_with(cx, |ws, cx| ws.editor.read(cx).alt_session.is_some()));
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(ws.read_with(cx, |ws, cx| ws.editor.read(cx).alt_session.is_none()));
+        let page_focused = ws.update_in(cx, |ws, window, cx| {
+            gpui::Focusable::focus_handle(ws.editor.read(cx), cx).is_focused(window)
+        });
+        assert!(page_focused);
     }
 
     #[gpui::test]

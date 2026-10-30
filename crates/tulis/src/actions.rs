@@ -34,6 +34,7 @@ gpui::actions!(
         Redo,
         MakeAlternate,
         OpenAlternates,
+        CloseAlternates,
         CycleNext,
         CyclePrev,
         AcceptAlternate,

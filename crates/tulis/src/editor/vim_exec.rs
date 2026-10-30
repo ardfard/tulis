@@ -10,8 +10,7 @@ use tulis_core::{DocPos, Selection};
 
 use super::Editor;
 use crate::actions::{
-    AiAlternates, OpenAlternates, SendToOverflow, ShowCheatSheet, ToggleOverflowPanel,
-    TogglePreview, ToggleVim,
+    AiAlternates, SendToOverflow, ShowCheatSheet, ToggleOverflowPanel, TogglePreview, ToggleVim,
 };
 
 /// Commands that act on the selection; from Visual mode they get its inclusive end.
@@ -250,8 +249,8 @@ impl Editor {
             VimCommand::Lab => self.open_lab(window, cx),
             VimCommand::AiAlternatives => self.ai_alternates(&AiAlternates, window, cx),
             VimCommand::Stash => self.send_to_overflow(&SendToOverflow, window, cx),
-            // The sidebar arrives in Task 4, which calls the editor directly instead.
-            VimCommand::Alternatives => window.dispatch_action(Box::new(OpenAlternates), cx),
+            // Called directly (not dispatched): in Visual mode the selection must still be there.
+            VimCommand::Alternatives => self.open_alternates(None, cx),
             // Window-level commands: the workspace handles these actions.
             VimCommand::TogglePreview => window.dispatch_action(Box::new(TogglePreview), cx),
             VimCommand::CheatSheet => window.dispatch_action(Box::new(ShowCheatSheet), cx),

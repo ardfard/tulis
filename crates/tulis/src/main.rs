@@ -7,6 +7,7 @@ mod editor;
 mod header_dim;
 mod keymap;
 mod runs;
+mod sidebar;
 mod theme;
 mod toast;
 mod utf16;

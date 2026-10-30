@@ -2,6 +2,7 @@
 
 mod actions;
 pub(crate) mod ai;
+mod alt_session;
 mod element;
 mod features;
 mod input;
@@ -25,6 +26,7 @@ use tulis_core::history::{EditKind, History};
 use tulis_core::vim::{Mode, Vim};
 use tulis_core::{DocPos, Document, ParaId, Selection};
 
+pub use alt_session::{AltSession, Scope};
 use element::EditorElement;
 pub(crate) use element::GUTTER;
 use layout::LayoutCache;
@@ -39,6 +41,10 @@ pub type Snapshot = (Document, Selection);
 pub enum EditorEvent {
     /// A character was typed into the page (drives the header's auto-dim).
     Typed,
+    /// The alternates sidebar opened (or retargeted); the workspace focuses it.
+    AlternatesOpened,
+    /// The alternates sidebar closed; the workspace returns focus to the page.
+    AlternatesClosed,
 }
 
 impl gpui::EventEmitter<EditorEvent> for Editor {}
@@ -73,6 +79,8 @@ pub struct Editor {
     pub vim: Option<Vim>,
     pub alt_edit: Option<AltEdit>,
     pub cycled: Option<CycledGroup>,
+    /// The open alternates sidebar, if any.
+    pub alt_session: Option<AltSession>,
     pub ai_task: Option<Task<()>>,
     pub scroll: ScrollHandle,
     pub theme: Theme,
@@ -117,6 +125,7 @@ impl Editor {
             vim,
             alt_edit: None,
             cycled: None,
+            alt_session: None,
             ai_task: None,
             scroll: ScrollHandle::new(),
             theme: theme_id.theme(),
@@ -149,6 +158,7 @@ impl Editor {
         self.cycled = None;
         self.ai_task = None;
         self.marked = None;
+        self.close_alternates(cx);
         self.goal_x = None;
         self.dirty = false;
         self.autoscroll = true;
@@ -290,6 +300,7 @@ impl Editor {
         self.dirty = true;
         self.autoscroll = true;
         self.goal_x = None;
+        self.sync_alt_session(cx);
         cx.notify();
     }
 
@@ -518,6 +529,7 @@ impl Editor {
         self.goal_x = None;
         self.dirty = true;
         self.autoscroll = true;
+        self.sync_alt_session(cx);
         cx.notify();
     }
 }
@@ -559,6 +571,7 @@ impl Render for Editor {
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::make_alternate))
+            .on_action(cx.listener(Self::open_alternates_action))
             .on_action(cx.listener(Self::cycle_next))
             .on_action(cx.listener(Self::cycle_prev))
             .on_action(cx.listener(Self::accept_alternate))

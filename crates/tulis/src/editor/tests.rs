@@ -758,3 +758,132 @@ fn vim_g_shift_a_asks_ai_for_the_paragraph(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(texts(&editor, cx), vec!["Tea is lovely."]);
 }
+
+use super::Scope;
+use super::alt_session::AltRow;
+
+fn rows(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Vec<(String, bool, bool)> {
+    editor.read_with(cx, |e, _| {
+        e.alt_rows()
+            .into_iter()
+            .map(|AltRow { text, shown, ai }| (text, shown, ai))
+            .collect()
+    })
+}
+
+fn row(text: &str, shown: bool) -> (String, bool, bool) {
+    (text.to_string(), shown, false)
+}
+
+#[gpui::test]
+fn opening_the_sidebar_lists_the_word_and_creates_nothing(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    select(&editor, cx, DocPos::new(0, 6), DocPos::new(0, 6)); // just after "love"
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    let session = editor.read_with(cx, |e, _| e.alt_session.clone()).unwrap();
+    assert_eq!(
+        (session.scope, session.selection, session.range),
+        (Scope::Word, false, 2..6)
+    );
+    assert_eq!(rows(&editor, cx), vec![row("love", true)]);
+    editor.update(cx, |e, cx| e.close_alternates(cx));
+    editor.read_with(cx, |e, _| {
+        assert!(e.alt_session.is_none());
+        assert!(!e.doc.paragraphs[0].has_metadata());
+        assert!(!e.dirty);
+    });
+}
+
+#[gpui::test]
+fn word_tab_lists_a_groups_options_in_stored_order(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    editor.update(cx, |e, _| {
+        e.doc.add_option(0, 2..6, "adore".into()).unwrap();
+        e.selection = Selection::caret(DocPos::new(0, 3));
+    });
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    assert_eq!(
+        rows(&editor, cx),
+        vec![row("love", false), row("adore", true)]
+    );
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.alt_session.as_ref().unwrap().highlight),
+        1
+    );
+}
+
+#[gpui::test]
+fn selection_sentence_and_paragraph_tabs_retarget(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["One two. Three four."]);
+    select(&editor, cx, DocPos::new(0, 9), DocPos::new(0, 14));
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    let session = editor.read_with(cx, |e, _| e.alt_session.clone()).unwrap();
+    assert!(session.selection);
+    assert_eq!(rows(&editor, cx), vec![row("Three", true)]);
+    editor.update(cx, |e, cx| e.set_alt_scope(Scope::Sentence, cx));
+    assert_eq!(rows(&editor, cx), vec![row("Three four.", true)]);
+    editor.update(cx, |e, cx| {
+        e.doc.add_version(0, "Two versions.".into());
+        e.doc.set_active_version(0, 0);
+        e.set_alt_scope(Scope::Paragraph, cx);
+    });
+    assert_eq!(
+        rows(&editor, cx),
+        vec![
+            row("One two. Three four.", true),
+            row("Two versions.", false)
+        ]
+    );
+}
+
+#[gpui::test]
+fn a_multi_paragraph_selection_does_not_open_the_sidebar(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["a", "b"]);
+    select(&editor, cx, DocPos::new(0, 0), DocPos::new(1, 1));
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    assert!(editor.read_with(cx, |e, _| e.alt_session.is_none()));
+    assert_eq!(
+        editor
+            .read_with(cx, |e, _| e.last_notice().map(str::to_string))
+            .as_deref(),
+        Some("selection must be within one paragraph")
+    );
+}
+
+#[gpui::test]
+fn the_sidebar_closes_when_its_target_disappears(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea", "Next"]);
+    select(&editor, cx, DocPos::new(0, 3), DocPos::new(0, 3));
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    // Editing another paragraph leaves it open.
+    select(&editor, cx, DocPos::new(1, 4), DocPos::new(1, 4));
+    type_str(&editor, cx, "!");
+    assert!(editor.read_with(cx, |e, _| e.alt_session.is_some()));
+    // Typing inside the target closes it.
+    select(&editor, cx, DocPos::new(0, 4), DocPos::new(0, 4));
+    type_str(&editor, cx, "x");
+    assert!(editor.read_with(cx, |e, _| e.alt_session.is_none()));
+    // Deleting its paragraph closes the Paragraph tab.
+    select(&editor, cx, DocPos::new(1, 0), DocPos::new(1, 0));
+    editor.update(cx, |e, cx| e.open_alternates(Some(Scope::Paragraph), cx));
+    let end = editor.read_with(cx, |e, _| e.doc.end_pos());
+    select(&editor, cx, DocPos::new(0, 11), end);
+    editor.update_in(cx, |e, window, cx| e.backspace(&Backspace, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["I loxve tea"]);
+    assert!(editor.read_with(cx, |e, _| e.alt_session.is_none()));
+}
+
+#[gpui::test]
+fn vim_visual_ga_opens_the_selection_tab(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["I love tea"]);
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 2)));
+    type_str(&editor, cx, "vlllga");
+    let session = editor.read_with(cx, |e, _| e.alt_session.clone()).unwrap();
+    assert!(session.selection);
+    assert_eq!(session.range, 2..6); // Visual mode includes the character under the cursor
+    assert_eq!(rows(&editor, cx), vec![row("love", true)]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.vim_mode()),
+        Some(Mode::Normal)
+    );
+}

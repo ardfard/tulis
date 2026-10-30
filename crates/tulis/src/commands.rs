@@ -288,6 +288,15 @@ pub static COMMANDS: &[Command] = &[
         OpenAlternates
     ),
     cmd!(
+        "close_alternates",
+        "Close the sidebar",
+        Hidden,
+        ["escape"],
+        Some("AltSidebar"),
+        None,
+        CloseAlternates
+    ),
+    cmd!(
         "cycle_next",
         "Next alternate",
         Alternates,
