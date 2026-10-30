@@ -731,3 +731,30 @@ fn hidden_markers_record_no_handles(cx: &mut TestAppContext) {
     let handles = editor.read_with(cx, |e, _| e.layout.as_ref().unwrap().version_handles.len());
     assert_eq!(handles, 0);
 }
+
+#[gpui::test]
+fn vim_visual_gs_stashes_the_selection_and_returns_to_normal(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["Keep this. Stash that."]);
+    editor.update(cx, |e, _| {
+        e.selection = Selection::caret(DocPos::new(0, 11))
+    });
+    type_str(&editor, cx, "v$gs");
+    assert_eq!(texts(&editor, cx), vec!["Keep this. "]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.overflow[0].text.clone()),
+        "Stash that."
+    );
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.vim_mode()),
+        Some(Mode::Normal)
+    );
+}
+
+#[gpui::test]
+fn vim_g_shift_a_asks_ai_for_the_paragraph(cx: &mut TestAppContext) {
+    let (editor, cx) = vim_editor(cx, &["Tea is nice."]);
+    with_mock(&editor, cx, vec![r#"["Tea is lovely."]"#]);
+    type_str(&editor, cx, "gA");
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["Tea is lovely."]);
+}

@@ -11,7 +11,7 @@ pub fn bind(cx: &mut App) {
 mod tests {
     use gpui::TestAppContext;
 
-    use crate::actions::{CycleTheme, ToggleMarkers};
+    use crate::actions::{CycleTheme, OpenAlternates, SendToOverflow, ToggleGhost, ToggleMarkers};
     use crate::commands::COMMANDS;
 
     #[gpui::test]
@@ -24,6 +24,10 @@ mod tests {
             assert_eq!(keymap.bindings().len(), expected);
             assert_eq!(keymap.bindings_for_action(&CycleTheme).count(), 1);
             assert_eq!(keymap.bindings_for_action(&ToggleMarkers).count(), 1);
+            // New keys plus the old ones they replace.
+            assert_eq!(keymap.bindings_for_action(&OpenAlternates).count(), 2);
+            assert_eq!(keymap.bindings_for_action(&ToggleGhost).count(), 2);
+            assert_eq!(keymap.bindings_for_action(&SendToOverflow).count(), 2);
         });
     }
 }

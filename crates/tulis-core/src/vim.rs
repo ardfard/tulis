@@ -107,6 +107,12 @@ pub enum VimCommand {
     Lab,
     /// `gx`: show or hide the Overflow panel.
     ToggleOverflow,
+    /// `ga`: the alternates sidebar for the selection or the word under the cursor.
+    Alternatives,
+    /// `gA`: AI alternatives for the selection or the cursor's paragraph.
+    AiAlternatives,
+    /// `gs`: stash the selection or the cursor's paragraph in Overflow.
+    Stash,
 }
 
 /// The view command for `g` + `c`, if there is one.
@@ -118,6 +124,18 @@ fn g_view_command(c: char) -> Option<VimCommand> {
         '?' => VimCommand::CheatSheet,
         'l' => VimCommand::Lab,
         'x' => VimCommand::ToggleOverflow,
+        _ => return None,
+    })
+}
+
+/// The selection command for `g` + `c`, if there is one. In Visual mode these act on the
+/// selection and return to Normal.
+fn g_selection_command(c: char) -> Option<VimCommand> {
+    Some(match c {
+        'h' => VimCommand::ToggleGhost,
+        'a' => VimCommand::Alternatives,
+        'A' => VimCommand::AiAlternatives,
+        's' => VimCommand::Stash,
         _ => return None,
     })
 }
@@ -319,13 +337,14 @@ impl Vim {
     fn feed_prefixed(&mut self, prefix: char, c: char) -> Vec<VimCommand> {
         match (prefix, c) {
             ('g', 'g') => self.motion(Motion::DocStart),
-            ('g', 'h') if self.op.is_none() => {
+            ('g', c) if self.op.is_none() && g_selection_command(c).is_some() => {
                 self.reset();
+                let command = g_selection_command(c).expect("checked above");
                 if self.is_visual() {
                     self.mode = Mode::Normal;
-                    vec![VimCommand::ToggleGhost, VimCommand::EndVisual]
+                    vec![command, VimCommand::EndVisual]
                 } else {
-                    vec![VimCommand::ToggleGhost]
+                    vec![command]
                 }
             }
             ('g', c) if self.op.is_none() && g_view_command(c).is_some() => {
@@ -638,6 +657,21 @@ mod tests {
         assert_eq!(feed(&mut v, "gl"), vec![Lab]);
         assert_eq!(feed(&mut v, "gx"), vec![ToggleOverflow]);
         assert_eq!(v.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn g_selection_commands_end_visual_mode() {
+        let mut v = Vim::new();
+        assert_eq!(feed(&mut v, "ga"), vec![Alternatives]);
+        assert_eq!(feed(&mut v, "gA"), vec![AiAlternatives]);
+        assert_eq!(feed(&mut v, "gs"), vec![Stash]);
+        assert_eq!(v.mode(), Mode::Normal);
+        for (keys, command) in [("ga", Alternatives), ("gA", AiAlternatives), ("gs", Stash)] {
+            feed(&mut v, "v");
+            assert_eq!(feed(&mut v, keys), vec![command, EndVisual]);
+            assert_eq!(v.mode(), Mode::Normal);
+        }
+        assert_eq!(feed(&mut v, "dga"), vec![]);
     }
 
     #[test]

@@ -216,7 +216,7 @@ impl Workspace {
                             div()
                                 .text_xs()
                                 .text_color(t.text_muted)
-                                .child("Ctrl+Shift+O moves the selection or paragraph here."),
+                                .child("Ctrl+Shift+X stashes the selection or paragraph here."),
                         )
                     })
                     .children(items.into_iter().rev().map(|item| {
@@ -800,6 +800,41 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(ws.read_with(cx, |ws, _| ws.show_overflow));
+    }
+
+    #[gpui::test]
+    fn new_ghost_and_stash_keys_work_on_the_page(cx: &mut TestAppContext) {
+        init(cx);
+        let (ws, cx) = cx.add_window_view(|window, cx| {
+            Workspace::new(Config::default(), None, None, window, cx)
+        });
+        ws.update_in(cx, |ws, window, cx| {
+            ws.editor.update(cx, |e, cx| {
+                e.replace_text_in_range(None, "One two", window, cx);
+                e.selection = Selection {
+                    anchor: DocPos::new(0, 0),
+                    head: DocPos::new(0, 3),
+                };
+            });
+            ws.focus_editor(window, cx);
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("secondary-/");
+        let export = ws.read_with(cx, |ws, cx| {
+            ws.editor.read(cx).doc.paragraphs[0].export_text()
+        });
+        assert_eq!(export, " two");
+        ws.update(cx, |ws, cx| {
+            ws.editor.update(cx, |e, _| {
+                e.selection = Selection {
+                    anchor: DocPos::new(0, 4),
+                    head: DocPos::new(0, 7),
+                }
+            })
+        });
+        cx.simulate_keystrokes("secondary-shift-x");
+        let stashed = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.overflow.len());
+        assert_eq!(stashed, 1);
     }
 
     #[gpui::test]

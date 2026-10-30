@@ -9,13 +9,31 @@ use tulis_core::vim::{InsertAt, Mode, Motion, Operator, Vim, VimCommand, VimKey}
 use tulis_core::{DocPos, Selection};
 
 use super::Editor;
-use crate::actions::{ShowCheatSheet, ToggleOverflowPanel, TogglePreview, ToggleVim};
+use crate::actions::{
+    AiAlternates, OpenAlternates, SendToOverflow, ShowCheatSheet, ToggleOverflowPanel,
+    TogglePreview, ToggleVim,
+};
+
+/// Commands that act on the selection; from Visual mode they get its inclusive end.
+fn is_selection_command(command: VimCommand) -> bool {
+    matches!(
+        command,
+        VimCommand::ToggleGhost
+            | VimCommand::Alternatives
+            | VimCommand::AiAlternatives
+            | VimCommand::Stash
+    )
+}
 
 impl Editor {
     pub(crate) fn vim_key(&mut self, key: VimKey, window: &mut Window, cx: &mut Context<Self>) {
         let Some(vim) = self.vim.as_mut() else { return };
+        let was_visual = vim.is_visual();
         let commands = vim.feed(key);
         for command in commands {
+            if was_visual && is_selection_command(command) {
+                self.include_visual_end();
+            }
             self.exec_vim(command, window, cx);
         }
         self.clamp_for_normal_mode();
@@ -48,6 +66,15 @@ impl Editor {
             let pos = mv::prev_grapheme(&self.doc, DocPos::new(head.para, len));
             self.selection = Selection::caret(pos);
         }
+    }
+
+    /// Visual mode includes the character under the cursor: make the selection cover it.
+    fn include_visual_end(&mut self) {
+        let range = self.selection.range();
+        self.selection = Selection {
+            anchor: range.start,
+            head: self.next_in_para(range.end),
+        };
     }
 
     /// The next grapheme, but never across a paragraph boundary.
@@ -221,6 +248,10 @@ impl Editor {
             VimCommand::CycleTheme => self.cycle_theme(cx),
             VimCommand::ToggleMarkers => self.toggle_markers(cx),
             VimCommand::Lab => self.open_lab(window, cx),
+            VimCommand::AiAlternatives => self.ai_alternates(&AiAlternates, window, cx),
+            VimCommand::Stash => self.send_to_overflow(&SendToOverflow, window, cx),
+            // The sidebar arrives in Task 4, which calls the editor directly instead.
+            VimCommand::Alternatives => window.dispatch_action(Box::new(OpenAlternates), cx),
             // Window-level commands: the workspace handles these actions.
             VimCommand::TogglePreview => window.dispatch_action(Box::new(TogglePreview), cx),
             VimCommand::CheatSheet => window.dispatch_action(Box::new(ShowCheatSheet), cx),

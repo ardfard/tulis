@@ -279,13 +279,13 @@ pub static COMMANDS: &[Command] = &[
     ),
     // Alternates
     cmd!(
-        "make_alternate",
-        "Make an alternate",
+        "alternatives",
+        "Alternatives sidebar",
         Alternates,
-        ["secondary-d"],
+        ["secondary-shift-a", "secondary-d"],
         ED,
-        None,
-        MakeAlternate
+        Some("ga"),
+        OpenAlternates
     ),
     cmd!(
         "cycle_next",
@@ -325,11 +325,11 @@ pub static COMMANDS: &[Command] = &[
     ),
     cmd!(
         "ai_alternates",
-        "AI alternates",
+        "AI alternatives",
         Alternates,
-        ["secondary-j"],
+        ["secondary-shift-g", "secondary-j"],
         ED,
-        None,
+        Some("gA"),
         AiAlternates
     ),
     // Ghost
@@ -337,19 +337,19 @@ pub static COMMANDS: &[Command] = &[
         "toggle_ghost",
         "Ghost / revive",
         Ghost,
-        ["secondary-g"],
+        ["secondary-/", "secondary-g"],
         ED,
         Some("gh"),
         ToggleGhost
     ),
     // Overflow
     cmd!(
-        "send_to_overflow",
-        "Send to Overflow",
+        "stash",
+        "Stash in Overflow",
         Overflow,
-        ["secondary-shift-o"],
+        ["secondary-shift-x", "secondary-shift-o"],
         ED,
-        None,
+        Some("gs"),
         SendToOverflow
     ),
     cmd!(
@@ -600,6 +600,9 @@ mod tests {
             VimCommand::CheatSheet => "cheat_sheet",
             VimCommand::Lab => "open_lab",
             VimCommand::ToggleOverflow => "toggle_overflow",
+            VimCommand::Alternatives => "alternatives",
+            VimCommand::AiAlternatives => "ai_alternates",
+            VimCommand::Stash => "stash",
             // Pure motions and editing grammar: no command-table row.
             VimCommand::Move { .. }
             | VimCommand::Operate { .. }
@@ -646,6 +649,9 @@ mod tests {
             VimCommand::CheatSheet,
             VimCommand::Lab,
             VimCommand::ToggleOverflow,
+            VimCommand::Alternatives,
+            VimCommand::AiAlternatives,
+            VimCommand::Stash,
         ];
         for command in &commands {
             let id = vim_id(command).expect("user-facing command has an id");
@@ -680,6 +686,8 @@ mod tests {
         assert_eq!(key_label("secondary-\\"), format!("{ctrl}+\\"));
         assert_eq!(key_label("escape"), "Esc");
         assert_eq!(key_label("ctrl--"), "Ctrl+-");
+        assert_eq!(key_label("secondary-/"), format!("{ctrl}+/"));
+        assert_eq!(key_label("secondary-shift-a"), format!("{ctrl}+Shift+A"));
     }
 
     #[test]
@@ -693,6 +701,7 @@ mod tests {
         assert_eq!(theme[0].1[0].vim, "gt");
         assert_eq!(cheat_sheet("gx")[0].1[0].label, "Show / hide Overflow");
         assert_eq!(cheat_sheet("linkedin")[0].1[0].key, "—");
+        assert_eq!(cheat_sheet("ai alt")[0].1[0].label, "AI alternatives");
         assert!(cheat_sheet("zzzz").is_empty());
     }
 }

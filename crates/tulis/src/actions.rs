@@ -33,6 +33,7 @@ gpui::actions!(
         Undo,
         Redo,
         MakeAlternate,
+        OpenAlternates,
         CycleNext,
         CyclePrev,
         AcceptAlternate,
