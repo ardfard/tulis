@@ -94,6 +94,11 @@ pub enum VimCommand {
         forward: bool,
         count: usize,
     },
+    /// `]m` / `[m`: the next or previous Lab cut or mark.
+    JumpMark {
+        forward: bool,
+        count: usize,
+    },
     ToggleGhost,
     /// `gt`: next theme preset.
     CycleTheme,
@@ -363,6 +368,14 @@ impl Vim {
                 let count = self.count();
                 self.reset();
                 vec![VimCommand::CycleAlt {
+                    forward: prefix == ']',
+                    count,
+                }]
+            }
+            (']' | '[', 'm') if self.op.is_none() => {
+                let count = self.count();
+                self.reset();
+                vec![VimCommand::JumpMark {
                     forward: prefix == ']',
                     count,
                 }]
@@ -653,6 +666,27 @@ mod tests {
                 count: 1
             }]
         );
+    }
+
+    #[test]
+    fn bracket_m_jumps_between_marks() {
+        let mut v = Vim::new();
+        assert_eq!(
+            feed(&mut v, "]m"),
+            vec![JumpMark {
+                forward: true,
+                count: 1
+            }]
+        );
+        assert_eq!(
+            feed(&mut v, "2[m"),
+            vec![JumpMark {
+                forward: false,
+                count: 2
+            }]
+        );
+        assert_eq!(feed(&mut v, "d]m"), vec![]);
+        assert!(!v.is_pending());
     }
 
     #[test]

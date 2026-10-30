@@ -14,11 +14,12 @@ use tulis_core::config::Config;
 use tulis_core::storage;
 
 use crate::actions::{
-    AiAlternates, CycleTheme, New, Open, OpenAlternates, OpenLab, Quit, Save, SaveAs,
-    SendToOverflow, ToggleGhost, ToggleMarkers, ToggleOverflowPanel, TogglePreview,
+    AiAlternates, CycleTheme, LabDocument, LabParagraph, New, Open, OpenAlternates, OpenLab, Quit,
+    Save, SaveAs, SendToOverflow, ToggleGhost, ToggleMarkers, ToggleOverflowPanel, TogglePreview,
 };
 use crate::editor::{Editor, EditorEvent, GUTTER};
 use crate::header_dim::HeaderDim;
+use crate::lab_popover::{LabEvent, LabPanel};
 use crate::scratchpad::OverflowDrag;
 use crate::theme;
 
@@ -34,6 +35,9 @@ pub struct Workspace {
     pub(crate) scratchpad: Option<Entity<crate::scratchpad::Scratchpad>>,
     pub(crate) preview: bool,
     preview_focus: FocusHandle,
+    /// The Lab popover's contents, and whether it is open.
+    pub(crate) lab: Entity<LabPanel>,
+    pub(crate) lab_open: bool,
     pub(crate) header_dim: HeaderDim,
     /// Repaints the header when its auto-dim state is due to change.
     pub(crate) dim_timer: Option<Task<()>>,
@@ -56,6 +60,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(|cx| Editor::new(config, Document::new(), cx));
+        let lab = cx.new(|cx| LabPanel::new(editor.clone(), cx));
         let subscriptions =
             vec![
                 cx.observe(&editor, |_, _, cx| cx.notify()),
@@ -64,7 +69,11 @@ impl Workspace {
                         EditorEvent::Typed => ws.typed(cx),
                         EditorEvent::AlternatesOpened => ws.alternates_opened(window, cx),
                         EditorEvent::AlternatesClosed => ws.alternates_closed(window, cx),
+                        EditorEvent::LabDone => ws.close_lab(cx),
                     }
+                }),
+                cx.subscribe(&lab, |ws, _, event: &LabEvent, cx| match event {
+                    LabEvent::Close => ws.close_lab(cx),
                 }),
             ];
         let initial_theme = editor.read(cx).theme;
@@ -79,6 +88,8 @@ impl Workspace {
             scratchpad: None,
             preview: false,
             preview_focus: cx.focus_handle(),
+            lab,
+            lab_open: false,
             header_dim: HeaderDim::default(),
             dim_timer: None,
             window_title: String::new(),
@@ -151,8 +162,55 @@ impl Workspace {
         self.editor.update(cx, |e, cx| e.toggle_markers(cx));
     }
 
-    pub(crate) fn open_lab(&mut self, _: &OpenLab, window: &mut Window, cx: &mut Context<Self>) {
-        self.editor.update(cx, |e, cx| e.open_lab(window, cx));
+    /// LAB, Ctrl+L, vim `gl`: the Lab on the selection's paragraphs, or the whole document.
+    pub(crate) fn open_lab(&mut self, _: &OpenLab, _: &mut Window, cx: &mut Context<Self>) {
+        let scope = self.editor.read(cx).lab_scope();
+        self.show_lab(scope, cx);
+    }
+
+    /// Ctrl+Shift+T: the Lab on the cursor's paragraph.
+    fn lab_paragraph(&mut self, _: &LabParagraph, _: &mut Window, cx: &mut Context<Self>) {
+        let editor = self.editor.read(cx);
+        let scope = vec![editor.doc.paragraphs[editor.cursor().para].id];
+        self.show_lab(scope, cx);
+    }
+
+    /// Ctrl+Shift+Alt+T: the Lab on the whole document.
+    fn lab_document(&mut self, _: &LabDocument, _: &mut Window, cx: &mut Context<Self>) {
+        let scope = self
+            .editor
+            .read(cx)
+            .doc
+            .paragraphs
+            .iter()
+            .map(|p| p.id)
+            .collect();
+        self.show_lab(scope, cx);
+    }
+
+    /// Open the popover on `scope`. It takes focus when it renders.
+    fn show_lab(&mut self, scope: Vec<tulis_core::ParaId>, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, _| {
+            e.finish_alt_edit();
+        });
+        self.lab.update(cx, |lab, cx| lab.reset(scope, cx));
+        self.lab_open = true;
+        cx.notify();
+    }
+
+    /// Close the popover (Esc, a click outside, LAB, or its run finishing). A run still waiting
+    /// for the AI is stopped. Focus goes back where it was when the popover opened.
+    pub(crate) fn close_lab(&mut self, cx: &mut Context<Self>) {
+        if !std::mem::take(&mut self.lab_open) {
+            return;
+        }
+        self.editor.update(cx, |e, cx| {
+            if e.lab_running() {
+                e.stop_ai();
+                e.set_notice("Lab stopped", cx);
+            }
+        });
+        cx.notify();
     }
 
     fn cycle_theme(&mut self, _: &CycleTheme, _: &mut Window, cx: &mut Context<Self>) {
@@ -343,6 +401,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::cycle_theme))
             .on_action(cx.listener(Self::toggle_markers))
             .on_action(cx.listener(Self::open_lab))
+            .on_action(cx.listener(Self::lab_paragraph))
+            .on_action(cx.listener(Self::lab_document))
             .on_action(cx.listener(Self::toggle_preview))
             .on_action(cx.listener(Self::share_x))
             .on_action(cx.listener(Self::share_linkedin))
@@ -1208,6 +1268,162 @@ mod tests {
         cx.simulate_keystrokes("secondary-z");
         cx.run_until_parked();
         assert_eq!(scratchpad_caret(&ws, cx), original.len());
+    }
+
+    fn draw(cx: &mut gpui::VisualTestContext) {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn lab_open(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {
+        ws.read_with(cx, |ws, _| ws.lab_open)
+    }
+
+    fn lab_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {
+        let lab = ws.read_with(cx, |ws, _| ws.lab.clone());
+        cx.update(|window, cx| lab.read(cx).focus.is_focused(window))
+    }
+
+    fn lab_scope(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> Vec<usize> {
+        ws.read_with(cx, |ws, cx| {
+            let doc = &ws.editor.read(cx).doc;
+            let scope = &ws.lab.read(cx).scope;
+            scope.iter().filter_map(|id| doc.para_index(*id)).collect()
+        })
+    }
+
+    fn lab_mock(
+        ws: &gpui::Entity<Workspace>,
+        cx: &mut gpui::VisualTestContext,
+        responses: &[&str],
+    ) -> std::sync::Arc<tulis_core::ai::MockProvider> {
+        let mock = std::sync::Arc::new(tulis_core::ai::MockProvider::new(
+            responses.iter().map(|r| Ok(r.to_string())).collect(),
+        ));
+        ws.update(cx, |ws, cx| {
+            ws.editor
+                .update(cx, |e, _| e.provider_override = Some(mock.clone()))
+        });
+        mock
+    }
+
+    #[gpui::test]
+    fn ctrl_l_opens_the_lab_on_the_document_and_escape_closes_it(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["One.", "Two."]);
+        cx.simulate_keystrokes("secondary-l");
+        draw(cx);
+        assert!(lab_open(&ws, cx));
+        assert!(lab_focused(&ws, cx));
+        assert!(cx.debug_bounds("lab-panel").is_some());
+        assert_eq!(lab_scope(&ws, cx), vec![0, 1]);
+        cx.simulate_keystrokes("escape");
+        draw(cx);
+        assert!(!lab_open(&ws, cx));
+        assert!(page_focused(&ws, cx));
+        assert!(cx.debug_bounds("lab-panel").is_none());
+    }
+
+    #[gpui::test]
+    fn lab_keys_pick_a_trim_level_and_the_lab_closes_when_it_is_done(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["I really love tea."]);
+        let mock = lab_mock(&ws, cx, &[r#"["really "]"#]);
+        cx.simulate_keystrokes("secondary-l");
+        draw(cx);
+        cx.simulate_keystrokes("j j down k up right");
+        let highlight = ws.read_with(cx, |ws, cx| ws.lab.read(cx).highlight);
+        assert_eq!(highlight, 2);
+        cx.simulate_keystrokes("left enter");
+        draw(cx);
+        assert_eq!(mock.requests.lock().unwrap().len(), 1);
+        let preview = ws.read_with(cx, |ws, cx| ws.editor.read(cx).trim_preview.clone());
+        let preview = preview.expect("a trim preview");
+        assert_eq!(preview.level, crate::editor::TrimLevel::Slight);
+        assert_eq!(preview.cuts.len(), 1);
+        assert!(!lab_open(&ws, cx));
+        assert!(page_focused(&ws, cx));
+        // Nothing is cut until asked.
+        let text = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.paragraphs[0].text());
+        assert_eq!(text, "I really love tea.");
+    }
+
+    #[gpui::test]
+    fn the_lab_works_on_the_cursor_paragraph_the_selection_or_the_document(
+        cx: &mut TestAppContext,
+    ) {
+        let (ws, cx) = root_workspace(cx, &["One really.", "Two really.", "Three."]);
+        let mock = lab_mock(&ws, cx, &[r#"["really"]"#]);
+        let select = |ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext, a, b| {
+            ws.update(cx, |ws, cx| {
+                ws.editor
+                    .update(cx, |e, _| e.selection = Selection { anchor: a, head: b })
+            })
+        };
+        select(&ws, cx, DocPos::new(1, 2), DocPos::new(1, 2));
+        cx.simulate_keystrokes("secondary-shift-t");
+        draw(cx);
+        assert_eq!(lab_scope(&ws, cx), vec![1]);
+        cx.simulate_keystrokes("down enter");
+        draw(cx);
+        let requests = mock.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].user, "Two really.");
+        cx.simulate_keystrokes("secondary-shift-alt-t");
+        draw(cx);
+        assert_eq!(lab_scope(&ws, cx), vec![0, 1, 2]);
+        cx.simulate_keystrokes("escape");
+        draw(cx);
+        select(&ws, cx, DocPos::new(0, 1), DocPos::new(1, 2));
+        cx.simulate_keystrokes("secondary-l");
+        draw(cx);
+        assert_eq!(lab_scope(&ws, cx), vec![0, 1]);
+    }
+
+    #[gpui::test]
+    fn closing_the_lab_while_it_works_stops_the_remaining_requests(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["One really.", "Two really."]);
+        let mock = lab_mock(&ws, cx, &[r#"["really"]"#, r#"["really"]"#]);
+        cx.simulate_keystrokes("secondary-l");
+        draw(cx);
+        let lab = ws.read_with(cx, |ws, _| ws.lab.clone());
+        lab.update(cx, |lab, cx| {
+            lab.run(
+                crate::lab_popover::LabItem::Trim(crate::editor::TrimLevel::Slight),
+                cx,
+            )
+        });
+        // It stays open while the AI works.
+        assert!(lab_open(&ws, cx));
+        assert!(ws.read_with(cx, |ws, cx| ws.editor.read(cx).lab_running()));
+        ws.update(cx, |ws, cx| ws.close_lab(cx));
+        cx.run_until_parked();
+        assert!(mock.requests.lock().unwrap().len() < 2);
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.read_with(cx, |e, _| {
+            assert!(e.trim_preview.is_none());
+            assert!(!e.lab_running());
+            assert_eq!(e.last_notice(), Some("Lab stopped"));
+        });
+    }
+
+    #[gpui::test]
+    fn the_lab_button_and_vim_gl_open_the_lab(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["One."]);
+        draw(cx);
+        let button = cx.debug_bounds("lab-button").expect("the LAB button");
+        cx.simulate_click(button.center(), gpui::Modifiers::none());
+        draw(cx);
+        assert!(lab_open(&ws, cx));
+        assert!(lab_focused(&ws, cx));
+        cx.simulate_click(button.center(), gpui::Modifiers::none());
+        draw(cx);
+        assert!(!lab_open(&ws, cx));
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.update_in(cx, |e, window, cx| {
+            e.vim = Some(tulis_core::vim::Vim::new());
+            e.replace_text_in_range(None, "g", window, cx);
+            e.replace_text_in_range(None, "l", window, cx);
+        });
+        draw(cx);
+        assert!(lab_open(&ws, cx));
     }
 
     fn sidebar_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {

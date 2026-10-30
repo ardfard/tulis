@@ -1,9 +1,9 @@
-//! Turn a paragraph's spans, trim suggestions, IME marked range and `# ` title marker into GPUI
-//! text runs.
+//! Turn a paragraph's spans, a trim preview's cuts, IME marked range and `# ` title marker into
+//! GPUI text runs.
 
 use std::ops::Range;
 
-use gpui::{Font, Hsla, StrikethroughStyle, TextRun, UnderlineStyle, px};
+use gpui::{Font, Hsla, TextRun, UnderlineStyle, px};
 use tulis_core::Span;
 
 pub struct RunStyle {
@@ -11,16 +11,17 @@ pub struct RunStyle {
     /// The font of a `# ` title paragraph (bold).
     pub title_font: Font,
     pub color: Hsla,
-    pub trim: Hsla,
     /// The `# ` marker's color while the caret sits on it (otherwise it is not drawn).
     pub marker: Hsla,
     pub ghost_alpha: f32,
+    /// Alpha factor of a trim preview's active cuts.
+    pub fade_alpha: f32,
 }
 
 pub fn build_runs(
     text_len: usize,
     spans: &[Span],
-    trims: &[Range<usize>],
+    faded: &[Range<usize>],
     marked: Option<Range<usize>>,
     title_marker: usize,
     caret_on_marker: bool,
@@ -31,7 +32,7 @@ pub fn build_runs(
     for span in spans {
         cuts.extend([span.range.start, span.range.end]);
     }
-    for range in trims.iter().chain(marked.iter()) {
+    for range in faded.iter().chain(marked.iter()) {
         cuts.extend([range.start.min(text_len), range.end.min(text_len)]);
     }
     cuts.sort_unstable();
@@ -45,10 +46,13 @@ pub fn build_runs(
                 .find(|s| s.range.start <= a && b <= s.range.end);
             let ghost = span.is_some_and(|s| s.ghost);
             let in_marked = marked.as_ref().is_some_and(|m| m.start <= a && b <= m.end);
-            let trimmed = trims.iter().any(|t| t.start <= a && b <= t.end);
+            let fade = faded.iter().any(|t| t.start <= a && b <= t.end);
             let mut color = style.color;
             if ghost {
                 color.a *= style.ghost_alpha;
+            }
+            if fade {
+                color.a *= style.fade_alpha;
             }
             // The title's `# ` stays in the text but is not drawn, unless the caret is on it
             // (then the block cursor needs something under it).
@@ -65,10 +69,6 @@ pub fn build_runs(
                 thickness: px(1.),
                 wavy: false,
             });
-            let strikethrough = trimmed.then(|| StrikethroughStyle {
-                thickness: px(1.5),
-                color: Some(style.trim),
-            });
             TextRun {
                 len: b - a,
                 font: if title_marker > 0 {
@@ -79,7 +79,7 @@ pub fn build_runs(
                 color,
                 background_color: None,
                 underline,
-                strikethrough,
+                strikethrough: None,
             }
         })
         .collect()
@@ -99,7 +99,7 @@ mod tests {
             font: font("Test"),
             title_font,
             color: hsla(0., 0., 0., 1.),
-            trim: hsla(0., 1., 0.5, 1.),
+            fade_alpha: 0.35,
             marker: hsla(0., 0., 0.5, 0.5),
             ghost_alpha: 0.1,
         }
@@ -131,8 +131,10 @@ mod tests {
         );
         assert!(runs.iter().all(|r| r.underline.is_none()));
         assert!((runs[2].color.a - 0.1).abs() < 1e-6);
-        assert!(runs[3].strikethrough.is_some());
-        assert!(runs[4].strikethrough.is_none());
+        // A trim preview's cut is faded, not struck through.
+        assert!(runs.iter().all(|r| r.strikethrough.is_none()));
+        assert!((runs[3].color.a - 0.1 * 0.35).abs() < 1e-6);
+        assert!((runs[4].color.a - 0.1).abs() < 1e-6);
     }
 
     #[test]

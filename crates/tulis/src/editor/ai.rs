@@ -1,16 +1,16 @@
-//! AI alternates and AI trim: build requests, run them off the UI thread, apply results.
+//! AI alternates: build requests, run them off the UI thread, apply results.
 
 use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{Context, Window, prelude::*};
-use tulis_core::ai::{AiError, CompletionRequest, LlmProvider, prompts, provider_from_config};
+use tulis_core::ai::{AiError, LlmProvider, prompts, provider_from_config};
 use tulis_core::history::EditKind;
 use tulis_core::{AiKind, DocPos, ParaId, Selection, Source};
 
 use super::alt_session::MERGED_NOTICE;
-use super::{Editor, Scope, TrimSuggestion};
-use crate::actions::{AiAlternates, AiTrimDocument, AiTrimParagraph};
+use super::{Editor, Scope};
+use crate::actions::AiAlternates;
 
 pub(crate) const STALE_NOTICE: &str = "Text changed while AI was working; result dropped";
 
@@ -27,7 +27,7 @@ pub(crate) struct AlternatesJob {
 }
 
 impl Editor {
-    fn provider(&mut self, cx: &mut Context<Self>) -> Option<Arc<dyn LlmProvider>> {
+    pub(super) fn provider(&mut self, cx: &mut Context<Self>) -> Option<Arc<dyn LlmProvider>> {
         if let Some(provider) = self.provider_override.clone() {
             return Some(provider);
         }
@@ -127,6 +127,7 @@ impl Editor {
             group,
             source,
         };
+        self.stop_ai();
         let work = cx.background_spawn(async move { provider.complete(&request) });
         self.ai_task = Some(cx.spawn(async move |this, cx| {
             let result = work.await;
@@ -210,104 +211,5 @@ impl Editor {
             return has_original(p.options_at(seg)).then(|| p.segment_ranges()[seg].clone());
         }
         (p.text().get(job.range.clone()) == Some(job.original.as_str())).then(|| job.range.clone())
-    }
-
-    pub(super) fn ai_trim_paragraph(
-        &mut self,
-        _: &AiTrimParagraph,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let para = self.selection.head.para;
-        self.start_trim(vec![para], cx);
-    }
-
-    pub(crate) fn ai_trim_document(
-        &mut self,
-        _: &AiTrimDocument,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let all = (0..self.doc.paragraphs.len()).collect();
-        self.start_trim(all, cx);
-    }
-
-    fn start_trim(&mut self, paragraphs: Vec<usize>, cx: &mut Context<Self>) {
-        self.finish_alt_edit();
-        let jobs: Vec<(ParaId, String, CompletionRequest)> = paragraphs
-            .into_iter()
-            .filter_map(|i| {
-                let p = &self.doc.paragraphs[i];
-                let export = p.export_text();
-                (!export.trim().is_empty())
-                    .then(|| (p.id, p.text(), prompts::trim_request(&export, 10)))
-            })
-            .collect();
-        if jobs.is_empty() {
-            return self.set_notice("Nothing to trim", cx);
-        }
-        let Some(provider) = self.provider(cx) else {
-            return;
-        };
-        // One request per paragraph, in sequence, on the background executor.
-        let work = cx.background_spawn(async move {
-            jobs.into_iter()
-                .map(|(id, text, request)| (id, text, provider.complete(&request)))
-                .collect::<Vec<_>>()
-        });
-        self.ai_task = Some(cx.spawn(async move |this, cx| {
-            let results = work.await;
-            this.update(cx, |editor, cx| {
-                editor.ai_task = None;
-                editor.apply_trims(results, cx);
-            })
-            .ok();
-        }));
-        self.set_notice("AI is looking for cuts…", cx);
-    }
-
-    pub(crate) fn apply_trims(
-        &mut self,
-        results: Vec<(ParaId, String, Result<String, AiError>)>,
-        cx: &mut Context<Self>,
-    ) {
-        let mut found = 0;
-        let mut stale = 0;
-        let mut error = None;
-        for (id, text, result) in results {
-            let response = match result {
-                Ok(response) => response,
-                Err(e) => {
-                    error.get_or_insert(e.to_string());
-                    continue;
-                }
-            };
-            let Some(para) = self.doc.para_index(id) else {
-                stale += 1;
-                continue;
-            };
-            let p = &self.doc.paragraphs[para];
-            if p.text() != text {
-                stale += 1;
-                continue;
-            }
-            let ranges = prompts::locate_trims(&prompts::parse_trim(&response), p);
-            found += ranges.len();
-            self.trims.retain(|t| t.para_id != id);
-            self.trims.extend(
-                ranges
-                    .into_iter()
-                    .map(|range| TrimSuggestion { para_id: id, range }),
-            );
-        }
-        let mut notice = match (found, error) {
-            (0, Some(e)) => e,
-            (0, None) => "No cuts suggested".to_string(),
-            (n, _) => format!("{n} suggested cuts — Tab to accept, Esc to dismiss"),
-        };
-        if stale > 0 {
-            notice.push_str(&format!(" ({stale} changed paragraphs skipped)"));
-        }
-        self.set_notice(notice, cx);
     }
 }

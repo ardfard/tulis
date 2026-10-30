@@ -1,4 +1,4 @@
-//! Alternates, ghosting, overflow and trim-acceptance commands.
+//! Alternates, ghosting and overflow commands, and Esc.
 
 use std::ops::Range;
 
@@ -7,7 +7,7 @@ use tulis_core::alternates::{AltLevel, OpError};
 use tulis_core::history::EditKind;
 use tulis_core::{DocPos, Selection};
 
-use super::{AltEdit, CycledGroup, Editor, TrimSuggestion};
+use super::{AltEdit, CycledGroup, Editor};
 use crate::actions::*;
 
 const STASHED: &str = "Stashed to Overflow";
@@ -298,57 +298,15 @@ impl Editor {
         self.use_overflow(range, self.selection.head, copy, cx)
     }
 
-    /// Accept the trim suggestion under the cursor (or the next one, or the first) by ghosting it.
-    pub(super) fn accept_trim(&mut self, _: &AcceptTrim, _: &mut Window, cx: &mut Context<Self>) {
-        if self.trims.is_empty() {
-            return;
-        }
-        let head = self.selection.head;
-        let head_id = self.doc.paragraphs[head.para].id;
-        let order = |t: &TrimSuggestion| {
-            (
-                self.doc.para_index(t.para_id).unwrap_or(usize::MAX),
-                t.range.start,
-            )
-        };
-        let under_cursor = self.trims.iter().position(|t| {
-            t.para_id == head_id && t.range.start <= head.offset && head.offset <= t.range.end
-        });
-        let ix = under_cursor
-            .or_else(|| {
-                (0..self.trims.len())
-                    .filter(|&i| order(&self.trims[i]) >= (head.para, head.offset))
-                    .min_by_key(|&i| order(&self.trims[i]))
-            })
-            .or_else(|| (0..self.trims.len()).min_by_key(|&i| order(&self.trims[i])));
-        let Some(ix) = ix else { return };
-        let trim = self.trims.remove(ix);
-        let Some(para) = self.doc.para_index(trim.para_id) else {
-            return;
-        };
-        // Not `begin_edit`: ghosting doesn't change rendered text, so the other suggestions stay valid.
-        self.record_step(EditKind::Other);
-        match self.doc.set_ghost(para, trim.range, true) {
-            Ok(range) => {
-                self.selection = Selection::caret(DocPos::new(para, range.end));
-                self.dirty = true;
-                self.autoscroll = true;
-                cx.notify();
-            }
-            Err(e) => self.set_notice(e.to_string(), cx),
-        }
-    }
-
-    /// Esc: cancel AI, else dismiss trims, else stop editing an alternate (and leave vim's
-    /// Insert or Visual mode, or drop its pending keys). With none of that to do, close an open
-    /// sidebar.
+    /// Esc: cancel AI, else close the trim preview, else stop editing an alternate (and leave
+    /// vim's Insert or Visual mode, or drop its pending keys). With none of that to do, close an
+    /// open sidebar.
     pub(super) fn cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
-        if self.ai_task.take().is_some() {
+        if self.stop_ai() {
             return self.set_notice("AI request cancelled", cx);
         }
-        if !self.trims.is_empty() {
-            self.trims.clear();
-            return self.set_notice("Trim suggestions dismissed", cx);
+        if self.trim_preview.take().is_some() {
+            return self.set_notice("Trim preview closed", cx);
         }
         let idle = self.alt_edit.is_none()
             && self

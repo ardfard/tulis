@@ -77,7 +77,7 @@ fn build_layout(
             font: font(editor.font_family.clone()),
             title_font: title_font.clone(),
             color: faded(editor.theme.text, alpha),
-            trim: faded(editor.theme.trim, alpha),
+            fade_alpha: editor.theme.fade_alpha,
             marker: faded(editor.theme.text_muted, 0.5 * alpha),
             ghost_alpha: editor.theme.ghost_alpha,
         }
@@ -95,12 +95,11 @@ fn build_layout(
     let mut paras = Vec::with_capacity(editor.doc.paragraphs.len());
     for (i, p) in editor.doc.paragraphs.iter().enumerate() {
         let text = p.text();
-        let trims: Vec<_> = editor
-            .trims
-            .iter()
-            .filter(|t| t.para_id == p.id)
-            .map(|t| t.range.clone())
-            .collect();
+        let cuts = editor
+            .trim_preview
+            .as_ref()
+            .map(|t| t.active_ranges(p.id))
+            .unwrap_or_default();
         let marked_here =
             marked.and_then(|(a, b)| (a.para == i && b.para == i).then(|| a.offset..b.offset));
         let text_len = text.len();
@@ -111,7 +110,7 @@ fn build_layout(
         let runs = build_runs(
             text_len,
             &p.spans(),
-            &trims,
+            &cuts,
             marked_here,
             title_marker,
             caret_on_marker,

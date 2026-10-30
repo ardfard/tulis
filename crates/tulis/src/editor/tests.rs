@@ -2,7 +2,8 @@ use gpui::{Entity, EntityInputHandler, TestAppContext, VisualTestContext};
 use tulis_core::config::Config;
 use tulis_core::{DocPos, Document, Selection};
 
-use super::{AltEdit, Editor, TrimSuggestion};
+use super::lab::TrimSuggestion;
+use super::{AltEdit, Editor, TrimPreview};
 use crate::actions::*;
 
 pub(crate) fn editor_with<'a>(
@@ -389,33 +390,6 @@ fn dropping_a_block_puts_it_where_it_lands(cx: &mut TestAppContext) {
     assert_eq!(overflow(cx), "Block.\n\nOther.");
 }
 
-#[gpui::test]
-fn accepting_a_trim_ghosts_it_and_escape_dismisses(cx: &mut TestAppContext) {
-    let (editor, cx) = editor_with(cx, &["I really love tea, really."]);
-    editor.update(cx, |e, _| {
-        let id = e.doc.paragraphs[0].id;
-        e.trims = vec![
-            TrimSuggestion {
-                para_id: id,
-                range: 2..9,
-            }, // "really "
-            TrimSuggestion {
-                para_id: id,
-                range: 18..25,
-            }, // " really"
-        ];
-    });
-    // The cursor is at (0,0): the next suggestion at/after it is 2..9.
-    editor.update_in(cx, |e, window, cx| e.accept_trim(&AcceptTrim, window, cx));
-    assert_eq!(
-        editor.read_with(cx, |e, _| e.doc.paragraphs[0].export_text()),
-        "I love tea, really."
-    );
-    assert_eq!(editor.read_with(cx, |e, _| e.trims.len()), 1);
-    editor.update_in(cx, |e, window, cx| e.cancel(&Cancel, window, cx));
-    assert!(editor.read_with(cx, |e, _| e.trims.is_empty()));
-}
-
 use std::sync::Arc;
 use tulis_core::ai::MockProvider;
 
@@ -472,22 +446,6 @@ fn stale_ai_result_is_dropped(cx: &mut TestAppContext) {
     assert_eq!(
         editor.read_with(cx, |e, _| e.last_notice().map(str::to_string)),
         Some(super::ai::STALE_NOTICE.to_string())
-    );
-}
-
-#[gpui::test]
-fn ai_trim_suggests_cuts_that_tab_accepts(cx: &mut TestAppContext) {
-    let (editor, cx) = editor_with(cx, &["I really love tea."]);
-    with_mock(&editor, cx, vec![r#"["really "]"#]);
-    editor.update_in(cx, |e, window, cx| {
-        e.ai_trim_paragraph(&AiTrimParagraph, window, cx)
-    });
-    cx.run_until_parked();
-    assert_eq!(editor.read_with(cx, |e, _| e.trims.clone()).len(), 1);
-    editor.update_in(cx, |e, window, cx| e.accept_trim(&AcceptTrim, window, cx));
-    assert_eq!(
-        editor.read_with(cx, |e, _| e.doc.paragraphs[0].export_text()),
-        "I love tea."
     );
 }
 
@@ -800,15 +758,6 @@ fn vim_gm_toggles_markers(cx: &mut TestAppContext) {
             .as_deref(),
         Some("Markers hidden")
     );
-}
-
-#[gpui::test]
-fn vim_gl_runs_the_document_trim_until_the_lab_exists(cx: &mut TestAppContext) {
-    let (editor, cx) = vim_editor(cx, &["I really love tea."]);
-    with_mock(&editor, cx, vec![r#"["really "]"#]);
-    type_str(&editor, cx, "gl");
-    cx.run_until_parked();
-    assert_eq!(editor.read_with(cx, |e, _| e.trims.len()), 1);
 }
 
 #[gpui::test]
@@ -1309,10 +1258,13 @@ fn every_preview_clears_trims_and_the_cycled_box(cx: &mut TestAppContext) {
     editor.update(cx, |e, cx| e.preview_alternate(1, cx));
     editor.update(cx, |e, cx| {
         let para_id = e.doc.paragraphs[0].id;
-        e.trims = vec![TrimSuggestion {
-            para_id,
-            range: 0..1,
-        }];
+        e.trim_preview = Some(TrimPreview::new(
+            super::TrimLevel::Slight,
+            vec![TrimSuggestion {
+                para_id,
+                range: 0..1,
+            }],
+        ));
         e.cycled = Some(super::CycledGroup {
             para_id,
             range: 2..7,
@@ -1320,7 +1272,7 @@ fn every_preview_clears_trims_and_the_cycled_box(cx: &mut TestAppContext) {
         e.preview_alternate(2, cx);
     });
     editor.read_with(cx, |e, _| {
-        assert!(e.trims.is_empty());
+        assert!(e.trim_preview.as_ref().unwrap().cuts.is_empty());
         assert!(e.cycled.is_none());
     });
 }
@@ -1465,13 +1417,16 @@ fn escape_on_the_page_closes_the_sidebar_when_nothing_else_is_pending(cx: &mut T
     editor.update(cx, |e, cx| e.open_alternates(None, cx));
     escape(cx);
     assert!(!open(cx));
-    // Trim suggestions are dismissed first.
+    // A trim preview is closed first.
     editor.update(cx, |e, cx| {
         let para_id = e.doc.paragraphs[0].id;
-        e.trims = vec![TrimSuggestion {
-            para_id,
-            range: 0..1,
-        }];
+        e.trim_preview = Some(TrimPreview::new(
+            super::TrimLevel::Slight,
+            vec![TrimSuggestion {
+                para_id,
+                range: 0..1,
+            }],
+        ));
         e.open_alternates(None, cx);
     });
     escape(cx);

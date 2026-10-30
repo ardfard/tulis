@@ -26,8 +26,6 @@ pub struct Theme {
     pub fade_alpha: f32,
     /// Background of Lab marks.
     pub mark_tint: Hsla,
-    /// Strikethrough of v1 trim suggestions.
-    pub trim: Hsla,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -98,7 +96,6 @@ impl ThemeId {
                     ghost_alpha: 0.06,
                     fade_alpha: 0.35,
                     mark_tint: with_alpha(hex(0xf2c94c), 0.18),
-                    trim: hex(0xf87171),
                 }
             }
             ThemeId::Paper => Theme {
@@ -117,7 +114,6 @@ impl ThemeId {
                 ghost_alpha: 0.12,
                 fade_alpha: 0.35,
                 mark_tint: hsla(0.14, 0.9, 0.6, 0.3),
-                trim: hsla(0.0, 0.7, 0.5, 0.9),
             },
             ThemeId::Sepia => Theme {
                 id: self,
@@ -135,7 +131,6 @@ impl ThemeId {
                 ghost_alpha: 0.12,
                 fade_alpha: 0.35,
                 mark_tint: with_alpha(hex(0xe0b040), 0.3),
-                trim: hex(0xb03a2e),
             },
             ThemeId::Black => {
                 let accent = hex(0x8b7cf6);
@@ -155,7 +150,6 @@ impl ThemeId {
                     ghost_alpha: 0.08,
                     fade_alpha: 0.35,
                     mark_tint: with_alpha(hex(0xf2c94c), 0.18),
-                    trim: hex(0xf87171),
                 }
             }
         }

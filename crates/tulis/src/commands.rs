@@ -500,31 +500,67 @@ pub static COMMANDS: &[Command] = &[
         OpenLab
     ),
     cmd!(
-        "ai_trim_paragraph",
-        "AI trim: paragraph",
+        "lab_paragraph",
+        "The Lab: this paragraph",
         Lab,
         ["secondary-shift-t"],
         ED,
         None,
-        AiTrimParagraph
+        LabParagraph
     ),
     cmd!(
-        "ai_trim_document",
-        "AI trim: document",
+        "lab_document",
+        "The Lab: whole document",
         Lab,
         ["secondary-shift-alt-t"],
         ED,
         None,
-        AiTrimDocument
+        LabDocument
     ),
     cmd!(
-        "accept_trim",
-        "Accept a trim",
+        "lab_next",
+        "Lab: next row",
+        Hidden,
+        ["down", "j", "right"],
+        Some("Lab"),
+        None,
+        LabNext
+    ),
+    cmd!(
+        "lab_prev",
+        "Lab: previous row",
+        Hidden,
+        ["up", "k", "left"],
+        Some("Lab"),
+        None,
+        LabPrev
+    ),
+    cmd!(
+        "lab_choose",
+        "Lab: run this row",
+        Hidden,
+        ["enter"],
+        Some("Lab"),
+        None,
+        LabChoose
+    ),
+    cmd!(
+        "next_mark",
+        "Next cut or mark",
         Lab,
         ["tab"],
         ED,
-        None,
-        AcceptTrim
+        Some("]m"),
+        NextMark
+    ),
+    cmd!(
+        "prev_mark",
+        "Previous cut or mark",
+        Lab,
+        ["shift-tab"],
+        ED,
+        Some("[m"),
+        PrevMark
     ),
     // View
     cmd!(
@@ -722,6 +758,8 @@ mod tests {
             VimCommand::Redo { .. } => "redo",
             VimCommand::CycleAlt { forward: true, .. } => "cycle_next",
             VimCommand::CycleAlt { forward: false, .. } => "cycle_prev",
+            VimCommand::JumpMark { forward: true, .. } => "next_mark",
+            VimCommand::JumpMark { forward: false, .. } => "prev_mark",
             VimCommand::ToggleGhost => "toggle_ghost",
             VimCommand::CycleTheme => "cycle_theme",
             VimCommand::ToggleMarkers => "toggle_markers",
@@ -772,6 +810,14 @@ mod tests {
                 forward: false,
                 count: 1,
             },
+            VimCommand::JumpMark {
+                forward: true,
+                count: 1,
+            },
+            VimCommand::JumpMark {
+                forward: false,
+                count: 1,
+            },
             VimCommand::ToggleGhost,
             VimCommand::CycleTheme,
             VimCommand::ToggleMarkers,
@@ -819,6 +865,7 @@ mod tests {
         assert_eq!(key_label("ctrl--"), "Ctrl+-");
         assert_eq!(key_label("secondary-/"), format!("{ctrl}+/"));
         assert_eq!(key_label("secondary-shift-a"), format!("{ctrl}+Shift+A"));
+        assert_eq!(key_label("shift-tab"), "Shift+Tab");
     }
 
     #[test]

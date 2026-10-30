@@ -6,6 +6,7 @@ mod commands;
 mod editor;
 mod header_dim;
 mod keymap;
+mod lab_popover;
 mod runs;
 mod scratchpad;
 mod sidebar;

@@ -10,7 +10,7 @@ use tulis_core::{DocPos, Selection};
 
 use super::Editor;
 use crate::actions::{
-    AiAlternates, FocusOverflow, SendToOverflow, ShowCheatSheet, ToggleOverflowPanel,
+    AiAlternates, FocusOverflow, OpenLab, SendToOverflow, ShowCheatSheet, ToggleOverflowPanel,
     TogglePreview, ToggleVim,
 };
 
@@ -266,7 +266,8 @@ impl Editor {
             VimCommand::ToggleGhost => self.toggle_ghost_here(cx),
             VimCommand::CycleTheme => self.cycle_theme(cx),
             VimCommand::ToggleMarkers => self.toggle_markers(cx),
-            VimCommand::Lab => self.open_lab(window, cx),
+            VimCommand::Lab => window.dispatch_action(Box::new(OpenLab), cx),
+            VimCommand::JumpMark { forward, count } => self.jump_lab_item(forward, count, cx),
             VimCommand::AiAlternatives => self.ai_alternates(&AiAlternates, window, cx),
             VimCommand::Stash => self.send_to_overflow(&SendToOverflow, window, cx),
             // Called directly (not dispatched): in Visual mode the selection must still be there.

@@ -3,10 +3,11 @@
 use std::time::Instant;
 
 use gpui::{
-    Animation, AnimationExt, App, ClickEvent, ClipboardItem, Context, IntoElement, ParentElement,
-    Styled, Window, div, prelude::*, px,
+    Anchor, Animation, AnimationExt, App, ClickEvent, ClipboardItem, Context, IntoElement,
+    ParentElement, Styled, Window, div, prelude::*, px,
 };
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::popover::Popover;
 use gpui_component::{IconName, Selectable, Sizable};
 use tulis_core::alternates::AltLevel;
 use tulis_core::share::{self, ShareTarget};
@@ -17,6 +18,7 @@ use crate::actions::{
     Open, OpenLab, Save, ShareLinkedIn, ShareX, ShowCheatSheet, ToggleMarkers, ToggleOverflowPanel,
     TogglePreview,
 };
+use crate::lab_popover::LabButton;
 use crate::toast::TOAST_FADE;
 use crate::workspace::{Workspace, file_name};
 
@@ -327,23 +329,26 @@ impl Workspace {
                             })),
                     ),
             )
-            .child(
-                div()
-                    .id("lab")
-                    .px_3()
-                    .py_0p5()
-                    .rounded_md()
-                    .border_1()
-                    .border_dashed()
-                    .border_color(t.accent)
-                    .text_color(t.accent)
-                    .cursor_pointer()
-                    .hover(|s| s.bg(t.panel))
-                    .child("LAB")
-                    .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
-                        ws.open_lab(&OpenLab, window, cx)
-                    })),
-            )
+            .child({
+                let lab = self.lab.clone();
+                Popover::new("lab-popover")
+                    .anchor(Anchor::BottomCenter)
+                    .trigger(LabButton {
+                        open: self.lab_open,
+                        accent: t.accent,
+                        hover: t.panel,
+                    })
+                    .open(self.lab_open)
+                    .track_focus(&self.lab.read(cx).focus)
+                    .on_open_change(cx.listener(|ws, open: &bool, window, cx| {
+                        if *open {
+                            ws.open_lab(&OpenLab, window, cx)
+                        } else {
+                            ws.close_lab(cx)
+                        }
+                    }))
+                    .content(move |_, _, _| lab.clone())
+            })
             .child(
                 div().flex_1().flex().flex_row().justify_end().child(
                     div()

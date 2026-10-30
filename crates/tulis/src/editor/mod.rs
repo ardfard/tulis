@@ -6,14 +6,19 @@ mod alt_session;
 mod element;
 mod features;
 mod input;
+mod lab;
+#[cfg(test)]
+mod lab_tests;
 pub mod layout;
 mod markers;
 #[cfg(test)]
 pub(crate) mod tests;
 mod vim_exec;
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use gpui::{
@@ -30,6 +35,7 @@ use tulis_core::{DocPos, Document, ParaId, Selection};
 pub use alt_session::{AltSession, Scope};
 use element::EditorElement;
 pub(crate) use element::GUTTER;
+pub use lab::{TrimLevel, TrimPreview};
 use layout::LayoutCache;
 
 use crate::theme::{self, Theme};
@@ -59,15 +65,11 @@ pub enum EditorEvent {
     AlternatesOpened,
     /// The alternates sidebar closed; the workspace returns focus to the page.
     AlternatesClosed,
+    /// A Lab run finished (the popover, kept open while it worked, closes).
+    LabDone,
 }
 
 impl gpui::EventEmitter<EditorEvent> for Editor {}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TrimSuggestion {
-    pub para_id: ParaId,
-    pub range: Range<usize>,
-}
 
 /// The group (or paragraph, for versions) just cycled; boxed until the cursor leaves it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,13 +91,18 @@ pub struct Editor {
     pub config: Config,
     pub dirty: bool,
     pub toasts: ToastQueue,
-    pub trims: Vec<TrimSuggestion>,
+    /// The Lab's trim preview, if one is showing.
+    pub trim_preview: Option<TrimPreview>,
+    /// Located cuts by level, paragraph and the text sent, with the rendered text they index.
+    pub(crate) trim_cache: HashMap<lab::TrimKey, (String, Vec<Range<usize>>)>,
     pub vim: Option<Vim>,
     pub alt_edit: Option<AltEdit>,
     pub cycled: Option<CycledGroup>,
     /// The open alternates sidebar, if any.
     pub alt_session: Option<AltSession>,
     pub ai_task: Option<Task<()>>,
+    /// The running Lab request's cancel flag (see `Editor::stop_ai`).
+    pub ai_cancel: Option<Arc<AtomicBool>>,
     pub scroll: ScrollHandle,
     pub theme: Theme,
     /// Alternate and version markers are drawn (Ctrl+. / vim `gm`).
@@ -141,12 +148,14 @@ impl Editor {
             config,
             dirty: false,
             toasts: ToastQueue::default(),
-            trims: Vec::new(),
+            trim_preview: None,
+            trim_cache: HashMap::new(),
             vim,
             alt_edit: None,
             cycled: None,
             alt_session: None,
             ai_task: None,
+            ai_cancel: None,
             scroll: ScrollHandle::new(),
             theme: theme_id.theme(),
             show_markers: true,
@@ -177,10 +186,11 @@ impl Editor {
         self.selection = Selection::default();
         self.history = History::new(HISTORY_LIMIT);
         self.overflow_changed(false);
-        self.trims.clear();
+        self.trim_preview = None;
+        self.trim_cache.clear();
         self.alt_edit = None;
         self.cycled = None;
-        self.ai_task = None;
+        self.stop_ai();
         self.marked = None;
         self.close_alternates(cx);
         self.goal_x = None;
@@ -233,11 +243,6 @@ impl Editor {
             "Markers hidden"
         };
         self.set_notice(state, cx);
-    }
-
-    /// The Lab arrives with the Lab plan; until then this runs the v1 document trim.
-    pub fn open_lab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.ai_trim_document(&crate::actions::AiTrimDocument, window, cx);
     }
 
     pub fn cursor(&self) -> DocPos {
@@ -304,8 +309,8 @@ impl Shift {
 }
 
 impl Editor {
-    /// Record an undo step (call before mutating) and drop trim suggestions in the touched
-    /// paragraphs (`touched` is a range of paragraph indices).
+    /// Record an undo step (call before mutating) and drop the trim preview's cuts in the
+    /// touched paragraphs (`touched` is a range of paragraph indices).
     pub(crate) fn begin_edit(&mut self, kind: EditKind, touched: Range<usize>) {
         self.record_step(kind);
         self.drop_transient(touched);
@@ -332,8 +337,8 @@ impl Editor {
         self.selection = selection;
     }
 
-    /// Drop the cycled box and the trim suggestions in the touched paragraphs (`touched` is a
-    /// range of paragraph indices), as every edit does.
+    /// Drop the cycled box and the trim preview's cuts in the touched paragraphs (`touched` is
+    /// a range of paragraph indices), as every edit does.
     pub(crate) fn drop_transient(&mut self, touched: Range<usize>) {
         self.cycled = None;
         let end = touched.end.min(self.doc.paragraphs.len());
@@ -343,7 +348,9 @@ impl Editor {
             .get(touched.start.min(end)..end)
             .map(|ps| ps.iter().map(|p| p.id).collect())
             .unwrap_or_default();
-        self.trims.retain(|t| !ids.contains(&t.para_id));
+        if let Some(preview) = &mut self.trim_preview {
+            preview.retain(|cut| !ids.contains(&cut.para_id));
+        }
     }
 
     pub(crate) fn end_edit(&mut self, cx: &mut Context<Self>) {
@@ -606,7 +613,7 @@ impl Editor {
             anchor: self.doc.clamp(self.selection.anchor),
             head: self.doc.clamp(self.selection.head),
         };
-        self.trims.clear();
+        self.trim_preview = None;
         self.marked = None;
         self.goal_x = None;
         self.dirty = true;
@@ -660,10 +667,9 @@ impl Render for Editor {
             .on_action(cx.listener(Self::delete_alternate))
             .on_action(cx.listener(Self::toggle_ghost))
             .on_action(cx.listener(Self::send_to_overflow))
-            .on_action(cx.listener(Self::accept_trim))
+            .on_action(cx.listener(Self::next_mark))
+            .on_action(cx.listener(Self::prev_mark))
             .on_action(cx.listener(Self::ai_alternates))
-            .on_action(cx.listener(Self::ai_trim_paragraph))
-            .on_action(cx.listener(Self::ai_trim_document))
             .on_action(cx.listener(Self::cancel))
             .on_action(cx.listener(Self::open_context_menu))
             .on_action(cx.listener(Self::toggle_vim))
