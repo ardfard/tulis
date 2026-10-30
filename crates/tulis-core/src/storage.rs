@@ -164,9 +164,10 @@ fn read_sidecar(path: &Path, notices: &mut Vec<String>) -> Option<SidecarIn> {
             return None;
         }
     };
+    let mut migration_notice = None;
     let parsed = if version == 1 {
         serde_json::from_slice::<serde_json::Value>(&bytes).and_then(|mut json| {
-            migrate_v1(&mut json);
+            migration_notice = migrate_v1(&mut json);
             serde_json::from_value::<SidecarIn>(json)
         })
     } else {
@@ -174,7 +175,10 @@ fn read_sidecar(path: &Path, notices: &mut Vec<String>) -> Option<SidecarIn> {
     };
     match parsed {
         Ok(sidecar) => match sidecar.document.validate() {
-            Ok(()) => Some(sidecar),
+            Ok(()) => {
+                notices.extend(migration_notice);
+                Some(sidecar)
+            }
             Err(reason) => {
                 notices.push(format!("Ignoring unreadable sidecar: {reason}"));
                 None
@@ -188,26 +192,37 @@ fn read_sidecar(path: &Path, notices: &mut Vec<String>) -> Option<SidecarIn> {
 }
 
 /// A version 1 sidecar's overflow items become the scratchpad's text: their texts, in order,
-/// joined by blank lines.
-fn migrate_v1(sidecar: &mut serde_json::Value) {
-    let Some(document) = sidecar
-        .get_mut("document")
-        .and_then(serde_json::Value::as_object_mut)
-    else {
-        return;
-    };
-    let texts: Vec<&str> = document
-        .get("overflow")
-        .and_then(serde_json::Value::as_array)
-        .map(|items| {
-            items
+/// joined by blank lines. A `text` that isn't a string is kept as its JSON. Returns a notice when
+/// items could not be read: ones without a `text`, or an `overflow` that isn't a list (kept as
+/// its JSON).
+fn migrate_v1(sidecar: &mut serde_json::Value) -> Option<String> {
+    use serde_json::Value;
+    let document = sidecar.get_mut("document").and_then(Value::as_object_mut)?;
+    let (texts, notice) = match document.get("overflow") {
+        None | Some(Value::Null) => (Vec::new(), None),
+        Some(Value::Array(items)) => {
+            let texts: Vec<String> = items
                 .iter()
-                .filter_map(|item| item.get("text").and_then(serde_json::Value::as_str))
-                .collect()
-        })
-        .unwrap_or_default();
-    let joined = texts.join("\n\n");
-    document.insert("overflow".into(), joined.into());
+                .filter_map(|item| match item.get("text")? {
+                    Value::String(text) => Some(text.clone()),
+                    other => Some(other.to_string()),
+                })
+                .collect();
+            let skipped = items.len() - texts.len();
+            let notice = match skipped {
+                0 => None,
+                1 => Some("1 overflow item could not be read".to_string()),
+                n => Some(format!("{n} overflow items could not be read")),
+            };
+            (texts, notice)
+        }
+        Some(other) => (
+            vec![other.to_string()],
+            Some("Overflow items could not be read; kept as text".to_string()),
+        ),
+    };
+    document.insert("overflow".into(), texts.join("\n\n").into());
+    notice
 }
 
 /// Rebuild a document from Markdown paragraphs, reusing sidecar paragraphs whose export text
@@ -419,6 +434,61 @@ mod tests {
         let opened = open(&path).unwrap();
         assert!(opened.notices.is_empty(), "{:?}", opened.notices);
         assert_eq!(opened.document.overflow, "");
+    }
+
+    /// Rewrite a saved sidecar as version 1 with `overflow` set to raw JSON.
+    fn downgrade_to_v1_raw(md: &Path, overflow: serde_json::Value) {
+        let side = sidecar_path(md);
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(&side).unwrap()).unwrap();
+        json["format_version"] = 1.into();
+        json["document"]["overflow"] = overflow;
+        fs::write(&side, serde_json::to_vec(&json).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn version_1_sidecar_reports_unreadable_overflow_items_and_keeps_odd_texts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("essay.md");
+        save(&Document::from_texts(&["Text."]), &path).unwrap();
+        downgrade_to_v1_raw(
+            &path,
+            serde_json::json!([
+                {"id": 1, "text": "first"},
+                {"id": 2},
+                "a bare string",
+                {"id": 3, "text": 42},
+                {"id": 4, "text": ["a", "b"]},
+            ]),
+        );
+        let opened = open(&path).unwrap();
+        assert_eq!(
+            opened.notices,
+            vec!["2 overflow items could not be read".to_string()]
+        );
+        assert_eq!(opened.document.overflow, "first\n\n42\n\n[\"a\",\"b\"]");
+
+        downgrade_to_v1_raw(&path, serde_json::json!([{"id": 1}]));
+        let opened = open(&path).unwrap();
+        assert_eq!(
+            opened.notices,
+            vec!["1 overflow item could not be read".to_string()]
+        );
+        assert_eq!(opened.document.overflow, "");
+    }
+
+    #[test]
+    fn version_1_sidecar_whose_overflow_is_not_a_list_keeps_it_as_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("essay.md");
+        save(&Document::from_texts(&["Text."]), &path).unwrap();
+        downgrade_to_v1_raw(&path, serde_json::json!({"text": "odd"}));
+        let opened = open(&path).unwrap();
+        assert_eq!(
+            opened.notices,
+            vec!["Overflow items could not be read; kept as text".to_string()]
+        );
+        assert_eq!(opened.document.overflow, r#"{"text":"odd"}"#);
     }
 
     #[test]
