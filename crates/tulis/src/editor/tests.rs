@@ -267,6 +267,24 @@ fn stashing_the_paragraph_appends_it_and_undo_takes_it_back(cx: &mut TestAppCont
 }
 
 #[gpui::test]
+fn scratchpad_edits_mark_the_document_dirty_but_page_undo_keeps_them(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Page."]);
+    type_str(&editor, cx, "x");
+    editor.update(cx, |e, cx| {
+        e.dirty = false;
+        e.set_overflow("An idea.", cx);
+        assert!(e.dirty);
+    });
+    let overflow = |cx: &mut VisualTestContext| editor.read_with(cx, |e, _| e.doc.overflow.clone());
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["Page."]);
+    assert_eq!(overflow(cx), "An idea.");
+    editor.update_in(cx, |e, window, cx| e.redo(&Redo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["xPage."]);
+    assert_eq!(overflow(cx), "An idea.");
+}
+
+#[gpui::test]
 fn accepting_a_trim_ghosts_it_and_escape_dismisses(cx: &mut TestAppContext) {
     let (editor, cx) = editor_with(cx, &["I really love tea, really."]);
     editor.update(cx, |e, _| {

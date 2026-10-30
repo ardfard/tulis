@@ -80,6 +80,13 @@ impl<S: Clone> History<S> {
         Some(next)
     }
 
+    /// Apply `f` to every stored state, undo and redo steps alike. For changes that undo must
+    /// not revert (the Overflow scratchpad's own edits).
+    pub fn for_each_state(&mut self, mut f: impl FnMut(&mut S)) {
+        self.undo.iter_mut().for_each(|(_, state)| f(state));
+        self.redo.iter_mut().for_each(f);
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
@@ -178,6 +185,19 @@ mod tests {
         h.undo(s("e"));
         h.redo(s("c"));
         assert_ne!(h.newest_undo_id(), typing);
+    }
+
+    #[test]
+    fn for_each_state_rewrites_undo_and_redo_steps() {
+        let mut h = History::new(10);
+        let t0 = Instant::now();
+        h.record(EditKind::Other, t0, || s("a"));
+        h.record(EditKind::Other, t0, || s("b"));
+        assert_eq!(h.undo(s("c")), Some(s("b")));
+        h.for_each_state(|state| state.push('!'));
+        assert_eq!(h.redo(s("b")), Some(s("c!")));
+        assert_eq!(h.undo(s("c!")), Some(s("b")));
+        assert_eq!(h.undo(s("b")), Some(s("a!")));
     }
 
     #[test]

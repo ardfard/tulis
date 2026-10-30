@@ -205,6 +205,19 @@ impl Editor {
         self.set_notice(STASHED, cx);
     }
 
+    /// The scratchpad's own edits. They mark the document dirty but aren't page undo steps:
+    /// every stored step takes the new text, so page undo and redo leave it alone.
+    pub fn set_overflow(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.doc.overflow == text {
+            return;
+        }
+        self.doc.overflow = text.to_string();
+        self.history
+            .for_each_state(|(doc, _)| doc.overflow = text.to_string());
+        self.dirty = true;
+        cx.notify();
+    }
+
     /// Accept the trim suggestion under the cursor (or the next one, or the first) by ghosting it.
     pub(super) fn accept_trim(&mut self, _: &AcceptTrim, _: &mut Window, cx: &mut Context<Self>) {
         if self.trims.is_empty() {

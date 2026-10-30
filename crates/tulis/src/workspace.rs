@@ -29,6 +29,8 @@ pub struct Workspace {
     pub(crate) cheat_sheet: Option<Entity<crate::cheat_sheet::CheatSheet>>,
     /// The alternates sidebar's view, created the first time it opens.
     pub(crate) alt_sidebar: Option<Entity<crate::sidebar::AltSidebar>>,
+    /// The Overflow scratchpad's view, created the first time the panel opens.
+    pub(crate) scratchpad: Option<Entity<crate::scratchpad::Scratchpad>>,
     pub(crate) preview: bool,
     preview_focus: FocusHandle,
     pub(crate) header_dim: HeaderDim,
@@ -73,6 +75,7 @@ impl Workspace {
             banner: None,
             cheat_sheet: None,
             alt_sidebar: None,
+            scratchpad: None,
             preview: false,
             preview_focus: cx.focus_handle(),
             header_dim: HeaderDim::default(),
@@ -146,38 +149,21 @@ impl Workspace {
         self.editor.update(cx, |e, cx| e.cycle_theme(cx));
     }
 
+    /// XYZ, Ctrl+\, vim `gx`: show or hide the Overflow panel. Hiding it while it has focus
+    /// gives the page focus back.
     pub(crate) fn toggle_overflow(
         &mut self,
         _: &ToggleOverflowPanel,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.show_overflow = !self.show_overflow;
+        if self.show_overflow {
+            self.ensure_scratchpad(window, cx);
+        } else if self.scratchpad_focused(window, cx) {
+            self.focus_editor(window, cx);
+        }
         cx.notify();
-    }
-
-    /// The Overflow panel: the scratchpad's text (read-only until the scratchpad view lands).
-    fn render_overflow(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = self.editor.read(cx).theme;
-        let text = self.editor.read(cx).doc.overflow.clone();
-        div()
-            .w(px(280.))
-            .h_full()
-            .flex()
-            .flex_col()
-            .border_l_1()
-            .border_color(t.rule)
-            .bg(t.panel)
-            .child(div().px_3().py_2().text_sm().child("Overflow"))
-            .child(
-                div()
-                    .id("overflow-text")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .px_3()
-                    .text_sm()
-                    .child(text),
-            )
     }
 }
 
@@ -361,7 +347,7 @@ impl Render for Workspace {
                     })
                     .child(self.render_main(cx))
                     .when(self.show_overflow, |row| {
-                        row.child(self.render_overflow(cx))
+                        row.children(self.scratchpad.clone())
                     }),
             )
             .child(self.render_footer(cx))
@@ -836,6 +822,58 @@ mod tests {
         ws.update_in(cx, |ws, window, cx| ws.focus_editor(window, cx));
         cx.run_until_parked();
         (ws, cx)
+    }
+
+    fn scratchpad_value(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> String {
+        ws.read_with(cx, |ws, cx| {
+            let pad = ws.scratchpad.as_ref().expect("the panel has opened");
+            pad.read(cx).input.read(cx).value().to_string()
+        })
+    }
+
+    fn focus_scratchpad(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) {
+        ws.update_in(cx, |ws, window, cx| {
+            let input = ws.scratchpad.as_ref().unwrap().read(cx).input.clone();
+            window.focus(&gpui::Focusable::focus_handle(&input, cx), cx);
+        });
+    }
+
+    fn page_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {
+        ws.update_in(cx, |ws, window, cx| {
+            gpui::Focusable::focus_handle(ws.editor.read(cx), cx).is_focused(window)
+        })
+    }
+
+    #[gpui::test]
+    fn the_scratchpad_edits_the_documents_overflow(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["Page text."]);
+        ws.update(cx, |ws, cx| {
+            ws.editor
+                .update(cx, |e, _| e.doc.overflow = "First idea.".into())
+        });
+        cx.simulate_keystrokes("secondary-\\");
+        cx.run_until_parked();
+        assert!(ws.read_with(cx, |ws, _| ws.show_overflow));
+        assert_eq!(scratchpad_value(&ws, cx), "First idea.");
+        // Typing in it edits the document's overflow and marks the document dirty.
+        focus_scratchpad(&ws, cx);
+        cx.simulate_keystrokes("ctrl-end");
+        cx.simulate_input(" More.");
+        let (overflow, dirty) = ws.read_with(cx, |ws, cx| {
+            let e = ws.editor.read(cx);
+            (e.doc.overflow.clone(), e.dirty)
+        });
+        assert_eq!((overflow.as_str(), dirty), ("First idea. More.", true));
+        // A stash from the page shows up in it.
+        ws.update_in(cx, |ws, window, cx| ws.focus_editor(window, cx));
+        cx.simulate_keystrokes("secondary-shift-x");
+        cx.run_until_parked();
+        assert_eq!(scratchpad_value(&ws, cx), "First idea. More.\n\nPage text.");
+        // Hiding the panel while it has focus gives the page focus back.
+        focus_scratchpad(&ws, cx);
+        cx.simulate_keystrokes("secondary-\\");
+        cx.run_until_parked();
+        assert!(page_focused(&ws, cx));
     }
 
     fn sidebar_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {
