@@ -15,7 +15,6 @@ mod markers;
 pub(crate) mod tests;
 mod vim_exec;
 
-use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -98,7 +97,7 @@ pub struct Editor {
     /// How many fixes the last "Fix punctuation and typos" proposed, while its bar shows.
     pub lab_fixes: Option<usize>,
     /// Located cuts by level, paragraph and the text sent, with the rendered text they index.
-    pub(crate) trim_cache: HashMap<lab::TrimKey, (String, Vec<Range<usize>>)>,
+    pub(crate) trim_cache: lab::TrimCache,
     pub vim: Option<Vim>,
     pub alt_edit: Option<AltEdit>,
     pub cycled: Option<CycledGroup>,
@@ -155,7 +154,7 @@ impl Editor {
             trim_preview: None,
             marks: Vec::new(),
             lab_fixes: None,
-            trim_cache: HashMap::new(),
+            trim_cache: lab::TrimCache::default(),
             vim,
             alt_edit: None,
             cycled: None,

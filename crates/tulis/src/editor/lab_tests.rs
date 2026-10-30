@@ -812,3 +812,60 @@ fn done_and_clear_leave_a_pending_alternates_request_alone(cx: &mut TestAppConte
     cx.run_until_parked();
     assert_eq!(texts(&editor, cx), vec!["I hold it is fine."]);
 }
+
+#[gpui::test]
+fn a_cut_partly_inside_an_alternate_is_dropped(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea now."]);
+    editor.update(cx, |e, _| {
+        e.doc.make_alt(0, 2..13).unwrap();
+    });
+    mock(&editor, cx, &[r#"["really ", "tea "]"#]);
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_trim(TrimLevel::Slight, &all, cx));
+    cx.run_until_parked();
+    assert_eq!(cut_ranges(&editor, cx), vec![(0, 14..18)]);
+    assert_eq!(
+        bar_title(&editor, cx).as_deref(),
+        Some("Slight trim 5 → 4 words · −20%")
+    );
+    // What the bar counts is what Make the cuts ghosts.
+    editor.update(cx, |e, cx| e.bar_action(BarAction::MakeCuts, cx));
+    assert_eq!(exports(&editor, cx), vec!["I really love now."]);
+    let words = editor.read_with(cx, |e, _| tulis_core::stats::document_counts(&e.doc).words);
+    assert_eq!(words, 4);
+}
+
+#[gpui::test]
+fn a_trim_whose_paragraphs_all_changed_says_so(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea."]);
+    mock(&editor, cx, &[r#"["really "]"#]);
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_trim(TrimLevel::Slight, &all, cx));
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 0)));
+    type_str(&editor, cx, "Oh, ");
+    cx.run_until_parked();
+    assert!(editor.read_with(cx, |e, _| e.trim_preview.is_none()));
+    assert_eq!(
+        notice(&editor, cx).as_deref(),
+        Some("Text changed while the Lab was working")
+    );
+}
+
+#[gpui::test]
+fn the_trim_cache_keeps_the_newest_64_answers(cx: &mut TestAppContext) {
+    let paras: Vec<String> = (0..65).map(|i| format!("Para {i} really.")).collect();
+    let paras: Vec<&str> = paras.iter().map(String::as_str).collect();
+    let (editor, cx) = editor_with(cx, &paras);
+    let mock = mock(&editor, cx, &[r#"["really"]"#; 66]);
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_trim(TrimLevel::Slight, &all, cx));
+    cx.run_until_parked();
+    assert_eq!(mock.requests.lock().unwrap().len(), 65);
+    assert_eq!(editor.read_with(cx, |e, _| e.trim_cache.len()), 64);
+    // The oldest answer went; the newest is still there.
+    editor.update(cx, |e, cx| e.run_trim(TrimLevel::Slight, &all[64..], cx));
+    assert_eq!(mock.requests.lock().unwrap().len(), 65);
+    editor.update(cx, |e, cx| e.run_trim(TrimLevel::Slight, &all[..1], cx));
+    cx.run_until_parked();
+    assert_eq!(mock.requests.lock().unwrap().len(), 66);
+}

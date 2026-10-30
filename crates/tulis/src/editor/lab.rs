@@ -1,7 +1,7 @@
 //! The Lab on the page: trim previews, guide-check marks, the runner every Lab request goes
 //! through, and its cancel flag.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -290,6 +290,45 @@ pub(crate) type LabResults = Vec<(LabJob, Result<String, AiError>)>;
 /// Key of the trim cache: level, paragraph and the export text that was sent.
 pub(crate) type TrimKey = (TrimLevel, ParaId, String);
 
+/// How many located answers the trim cache keeps.
+const TRIM_CACHE_CAP: usize = 64;
+
+/// Located cuts by level, paragraph and the text sent, with the rendered text they index. It
+/// keeps the newest `TRIM_CACHE_CAP` answers.
+#[derive(Default)]
+pub(crate) struct TrimCache {
+    entries: HashMap<TrimKey, (String, Vec<Range<usize>>)>,
+    /// Keys, oldest first.
+    order: VecDeque<TrimKey>,
+}
+
+impl TrimCache {
+    pub fn get(&self, key: &TrimKey) -> Option<&(String, Vec<Range<usize>>)> {
+        self.entries.get(key)
+    }
+
+    pub fn insert(&mut self, key: TrimKey, value: (String, Vec<Range<usize>>)) {
+        if self.entries.insert(key.clone(), value).is_none() {
+            self.order.push_back(key);
+        }
+        while self.order.len() > TRIM_CACHE_CAP {
+            if let Some(oldest) = self.order.pop_front() {
+                self.entries.remove(&oldest);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+    }
+}
+
 /// Located fixes (or marks): ranges of a paragraph's rendered text, each with its text.
 type Located = Vec<(Range<usize>, String)>;
 
@@ -493,7 +532,7 @@ impl Editor {
             if cached.is_empty() {
                 return self.set_notice("Nothing to trim", cx);
             }
-            return self.show_trim(level, cached, cx);
+            return self.show_trim(level, cached, 0, cx);
         }
         self.run_lab(
             jobs,
@@ -514,6 +553,7 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         let mut failed = 0;
+        let mut stale = 0;
         let mut first_error = None;
         for (job, result) in results {
             let response = match result {
@@ -525,10 +565,12 @@ impl Editor {
                 }
             };
             let Some(para) = self.doc.para_index(job.para_id) else {
+                stale += 1;
                 continue;
             };
             let p = &self.doc.paragraphs[para];
             if p.text() != job.text {
+                stale += 1;
                 continue;
             }
             let ranges = prompts::locate_trims(&prompts::parse_trim(&response), p);
@@ -541,33 +583,43 @@ impl Editor {
         let notice = failure_notice(failed, total, first_error);
         let all_failed = failed == total && found.is_empty();
         if !all_failed {
-            self.show_trim(level, found, cx);
+            self.show_trim(level, found, stale, cx);
         }
         if let Some(notice) = notice {
             self.set_notice(notice, cx);
         }
     }
 
-    /// Show the preview of `found` (paragraphs whose text changed since are left out).
-    fn show_trim(&mut self, level: TrimLevel, found: Found, cx: &mut Context<Self>) {
+    /// Show the preview of `found` (paragraphs whose text changed since are left out; `stale`
+    /// more were left out already). A cut must hold whole alternates or none, since ghosting
+    /// grows to whole groups: cuts partly inside one are dropped.
+    fn show_trim(&mut self, level: TrimLevel, found: Found, stale: usize, cx: &mut Context<Self>) {
         let mut cuts: Vec<(usize, TrimSuggestion)> = Vec::new();
+        let mut fresh = 0;
         for (id, text, ranges) in found {
             let Some(para) = self.doc.para_index(id) else {
                 continue;
             };
-            if self.doc.paragraphs[para].text() != text {
+            let p = &self.doc.paragraphs[para];
+            if p.text() != text {
                 continue;
             }
+            fresh += 1;
             cuts.extend(
                 ranges
                     .into_iter()
+                    .filter(|range| p.expand_to_alt_boundaries(range.clone()) == *range)
                     .map(|range| (para, TrimSuggestion { para_id: id, range })),
             );
         }
         cuts.sort_by_key(|(para, cut)| (*para, cut.range.start));
         if cuts.is_empty() {
             self.trim_preview = None;
-            self.set_notice("No cuts suggested", cx);
+            if fresh == 0 && stale > 0 {
+                self.set_notice("Text changed while the Lab was working", cx);
+            } else {
+                self.set_notice("No cuts suggested", cx);
+            }
         } else {
             let cuts = cuts.into_iter().map(|(_, cut)| cut).collect();
             self.trim_preview = Some(TrimPreview::new(level, cuts));
