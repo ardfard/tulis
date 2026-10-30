@@ -14,10 +14,12 @@ pub enum EditKind {
 }
 
 pub struct History<S> {
-    undo: Vec<S>,
+    /// Undo steps, each with the id it got when pushed.
+    undo: Vec<(u64, S)>,
     redo: Vec<S>,
     last: Option<(EditKind, Instant)>,
     limit: usize,
+    next_id: u64,
 }
 
 impl<S: Clone> History<S> {
@@ -27,6 +29,7 @@ impl<S: Clone> History<S> {
             redo: Vec::new(),
             last: None,
             limit: limit.max(1),
+            next_id: 0,
         }
     }
 
@@ -39,7 +42,7 @@ impl<S: Clone> History<S> {
                 if para == last_para && now.saturating_duration_since(at) < COALESCE_WINDOW
         );
         if !coalesce {
-            self.undo.push(before());
+            self.push_undo(before());
             if self.undo.len() > self.limit {
                 self.undo.remove(0);
             }
@@ -48,12 +51,23 @@ impl<S: Clone> History<S> {
         self.last = Some((kind, now));
     }
 
+    fn push_undo(&mut self, state: S) {
+        self.undo.push((self.next_id, state));
+        self.next_id += 1;
+    }
+
+    /// The id of the newest undo step. Every pushed step (a recorded edit, or a redo) gets a new
+    /// id, so this tells whether the newest step is still one seen earlier.
+    pub fn newest_undo_id(&self) -> Option<u64> {
+        self.undo.last().map(|(id, _)| *id)
+    }
+
     pub fn break_coalescing(&mut self) {
         self.last = None;
     }
 
     pub fn undo(&mut self, current: S) -> Option<S> {
-        let previous = self.undo.pop()?;
+        let (_, previous) = self.undo.pop()?;
         self.redo.push(current);
         self.last = None;
         Some(previous)
@@ -61,7 +75,7 @@ impl<S: Clone> History<S> {
 
     pub fn redo(&mut self, current: S) -> Option<S> {
         let next = self.redo.pop()?;
-        self.undo.push(current);
+        self.push_undo(current);
         self.last = None;
         Some(next)
     }
@@ -143,6 +157,27 @@ mod tests {
         h.undo(s("b"));
         h.record(EditKind::Other, t0, || s("a"));
         assert!(!h.can_redo());
+    }
+
+    #[test]
+    fn every_pushed_step_gets_a_new_id() {
+        let mut h = History::new(10);
+        let t0 = Instant::now();
+        assert_eq!(h.newest_undo_id(), None);
+        h.record(EditKind::Other, t0, || s("a"));
+        let first = h.newest_undo_id();
+        h.undo(s("b"));
+        h.record(EditKind::Other, t0, || s("a"));
+        assert_ne!(h.newest_undo_id(), first);
+        let second = h.newest_undo_id();
+        h.record(EditKind::Typing { para: 0 }, t0, || s("c"));
+        let typing = h.newest_undo_id();
+        assert_ne!(typing, second);
+        h.record(EditKind::Typing { para: 0 }, t0, || s("d")); // coalesces
+        assert_eq!(h.newest_undo_id(), typing);
+        h.undo(s("e"));
+        h.redo(s("c"));
+        assert_ne!(h.newest_undo_id(), typing);
     }
 
     #[test]

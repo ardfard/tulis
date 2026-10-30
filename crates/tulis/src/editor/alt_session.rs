@@ -47,8 +47,10 @@ pub struct AltSession {
     pub text: String,
     /// The highlighted row.
     pub highlight: usize,
-    /// A preview has recorded its undo step since the last recorded operation.
-    pub(crate) previewed: bool,
+    /// The undo step this session's previews share: the id of the newest undo step right after
+    /// the first preview recorded it. Previews record a new step once it is no longer the newest
+    /// (after an undo, typing or any other recorded edit).
+    pub(crate) preview_step: Option<u64>,
 }
 
 /// One option (or version) listed in the sidebar.
@@ -122,7 +124,7 @@ impl Editor {
             range: 0..0,
             text: String::new(),
             highlight: 0,
-            previewed: false,
+            preview_step: None,
         });
         self.retarget_alt_session();
         cx.emit(EditorEvent::AlternatesOpened);
@@ -294,10 +296,17 @@ impl Editor {
         if row.shown {
             return cx.notify();
         }
-        let (scope, first_preview) = (session.scope, !session.previewed);
-        session.previewed = true;
-        if first_preview {
+        let scope = session.scope;
+        let shares_step =
+            session.preview_step.is_some() && session.preview_step == self.history.newest_undo_id();
+        if shares_step {
+            self.drop_transient(para..para + 1);
+        } else {
             self.begin_edit(EditKind::Other, para..para + 1);
+            let step = self.history.newest_undo_id();
+            if let Some(session) = self.alt_session.as_mut() {
+                session.preview_step = step;
+            }
         }
         let range = match (scope, seg) {
             (Scope::Paragraph, _) => {
@@ -339,28 +348,36 @@ impl Editor {
         let Some((para, seg)) = self.alt_session_target() else {
             return;
         };
-        if self.alt_rows().len() < 2 {
-            return;
-        }
+        let rows = self.alt_rows().len();
         let Some(scope) = self.alt_session.as_ref().map(|s| s.scope) else {
             return;
         };
+        // Two or more rows list a group's options (or the versions), so `index` names one.
+        // Checked before recording, so a no-op records no undo step.
+        let removable = rows >= 2
+            && index < rows
+            && match scope {
+                Scope::Paragraph => self.doc.paragraphs[para].versions.len() == rows,
+                Scope::Word | Scope::Sentence => seg.is_some(),
+            };
+        if !removable {
+            return;
+        }
         self.begin_edit(EditKind::Other, para..para + 1);
         let range = match (scope, seg) {
-            (Scope::Paragraph, _) if self.doc.remove_version(para, index) => {
+            (Scope::Paragraph, _) => {
+                self.doc.remove_version(para, index);
                 0..self.doc.paragraphs[para].len()
             }
-            (Scope::Word | Scope::Sentence, Some(seg)) => {
-                match self.doc.remove_option_at(para, seg, index) {
-                    Some(span) => span,
-                    None => return,
-                }
-            }
-            _ => return,
+            (_, Some(seg)) => self
+                .doc
+                .remove_option_at(para, seg, index)
+                .expect("checked: the group has this option and another"),
+            (_, None) => unreachable!("checked: the target is a group"),
         };
         self.update_alt_target(para, range.clone());
         if let Some(session) = self.alt_session.as_mut() {
-            session.previewed = false;
+            session.preview_step = None;
         }
         self.highlight_shown_row();
         self.selection = Selection::caret(DocPos::new(para, range.end));
@@ -377,7 +394,7 @@ impl Editor {
     pub(crate) fn alt_session_added(&mut self, para: usize, range: Range<usize>) {
         self.update_alt_target(para, range);
         if let Some(session) = self.alt_session.as_mut() {
-            session.previewed = false;
+            session.preview_step = None;
         }
         self.highlight_shown_row();
     }
@@ -413,16 +430,19 @@ impl Editor {
             return self.set_notice("Nothing to rewrite here", cx);
         }
         let merged = scope != Scope::Paragraph && self.merges_inner_groups(para, range.clone());
-        self.begin_edit(EditKind::Other, para..para + 1);
+        // Applied to a copy first, so a refused add records no undo step.
+        let mut doc = self.doc.clone();
         let range = if scope == Scope::Paragraph {
-            self.doc.add_version(para, text.to_string());
-            0..self.doc.paragraphs[para].len()
+            doc.add_version(para, text.to_string());
+            0..doc.paragraphs[para].len()
         } else {
-            match self.doc.add_option(para, range, text.to_string()) {
+            match doc.add_option(para, range, text.to_string()) {
                 Ok(span) => span,
                 Err(e) => return self.set_notice(e.to_string(), cx),
             }
         };
+        self.begin_edit(EditKind::Other, para..para + 1);
+        self.doc = doc;
         self.alt_session_added(para, range.clone());
         self.selection = Selection::caret(DocPos::new(para, range.end));
         self.end_edit(cx);

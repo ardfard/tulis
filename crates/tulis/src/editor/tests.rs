@@ -1155,3 +1155,59 @@ fn context_menu_commands_act_on_the_word_and_the_ghost_label_follows(cx: &mut Te
         "love"
     );
 }
+
+#[gpui::test]
+fn a_preview_after_undo_records_its_own_undo_step(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Draft one."]);
+    select(&editor, cx, DocPos::new(0, 10), DocPos::new(0, 10));
+    type_str(&editor, cx, " More");
+    editor.update(cx, |e, cx| {
+        e.doc.add_version(0, "Draft two.".into());
+        e.doc.set_active_version(0, 0);
+        e.open_alternates(Some(Scope::Paragraph), cx);
+        e.preview_alternate(1, cx);
+    });
+    assert_eq!(texts(&editor, cx), vec!["Draft two."]);
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["Draft one. More"]);
+    editor.update(cx, |e, cx| e.preview_alternate(1, cx));
+    assert_eq!(texts(&editor, cx), vec!["Draft two."]);
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["Draft one. More"]);
+}
+
+#[gpui::test]
+fn every_preview_clears_trims_and_the_cycled_box(cx: &mut TestAppContext) {
+    let (editor, cx) = three_options(cx);
+    editor.update(cx, |e, cx| e.preview_alternate(1, cx));
+    editor.update(cx, |e, cx| {
+        let para_id = e.doc.paragraphs[0].id;
+        e.trims = vec![TrimSuggestion {
+            para_id,
+            range: 0..1,
+        }];
+        e.cycled = Some(super::CycledGroup {
+            para_id,
+            range: 2..7,
+        });
+        e.preview_alternate(2, cx);
+    });
+    editor.read_with(cx, |e, _| {
+        assert!(e.trims.is_empty());
+        assert!(e.cycled.is_none());
+    });
+}
+
+#[gpui::test]
+fn removing_a_row_that_is_not_there_records_no_undo_step(cx: &mut TestAppContext) {
+    let (editor, cx) = three_options(cx);
+    editor.update(cx, |e, cx| e.remove_alternate(7, cx));
+    assert!(editor.read_with(cx, |e, _| !e.history.can_undo()));
+    let (editor, cx) = editor_with(cx, &["Draft one."]);
+    editor.update(cx, |e, cx| {
+        e.doc.add_version(0, "Draft two.".into());
+        e.open_alternates(Some(Scope::Paragraph), cx);
+        e.remove_alternate(5, cx);
+    });
+    assert!(editor.read_with(cx, |e, _| !e.history.can_undo()));
+}

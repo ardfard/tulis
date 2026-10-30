@@ -281,6 +281,12 @@ impl Editor {
         let (doc, selection) = (&self.doc, self.selection);
         self.history
             .record(kind, Instant::now(), || (doc.clone(), selection));
+        self.drop_transient(touched);
+    }
+
+    /// Drop the cycled box and the trim suggestions in the touched paragraphs (`touched` is a
+    /// range of paragraph indices), as every edit does.
+    pub(crate) fn drop_transient(&mut self, touched: Range<usize>) {
         self.cycled = None;
         let end = touched.end.min(self.doc.paragraphs.len());
         let ids: Vec<ParaId> = self
