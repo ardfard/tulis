@@ -104,6 +104,15 @@ impl Workspace {
         window.focus(&handle, cx);
     }
 
+    /// What shows in the middle: the Markdown preview while it is open, else the page.
+    pub(crate) fn main_focus(&self, cx: &App) -> FocusHandle {
+        if self.preview {
+            self.preview_focus.clone()
+        } else {
+            self.editor.focus_handle(cx)
+        }
+    }
+
     pub(crate) fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if !path.exists() {
             self.path = Some(path);
@@ -162,7 +171,7 @@ impl Workspace {
         if self.show_overflow {
             self.ensure_scratchpad(window, cx);
         } else if self.scratchpad_focused(window, cx) {
-            self.focus_editor(window, cx);
+            window.focus(&self.main_focus(cx), cx);
         }
         cx.notify();
     }
@@ -959,6 +968,49 @@ mod tests {
         assert!(page_focused(&ws, cx));
         // The panel stays open.
         assert!(ws.read_with(cx, |ws, _| ws.show_overflow));
+    }
+
+    #[gpui::test]
+    fn with_the_preview_open_the_scratchpad_keeps_text_and_escape_returns_to_the_preview(
+        cx: &mut TestAppContext,
+    ) {
+        let (ws, cx) = root_workspace(cx, &["Page."]);
+        ws.update(cx, |ws, cx| {
+            ws.editor.update(cx, |e, _| e.doc.overflow = "Idea.".into())
+        });
+        ws.update_in(cx, |ws, window, cx| {
+            ws.toggle_preview(&crate::actions::TogglePreview, window, cx)
+        });
+        cx.simulate_keystrokes("secondary-shift-\\");
+        cx.run_until_parked();
+        assert!(scratchpad_focused(&ws, cx));
+        for keys in ["secondary-enter", "secondary-shift-enter"] {
+            cx.simulate_keystrokes(keys);
+            cx.run_until_parked();
+            let (page, overflow, notice) = ws.read_with(cx, |ws, cx| {
+                let e = ws.editor.read(cx);
+                let notice = e.last_notice().map(str::to_string);
+                (e.doc.paragraphs[0].text(), e.doc.overflow.clone(), notice)
+            });
+            assert_eq!(page, "Page.", "{keys}");
+            assert_eq!(overflow, "Idea.", "{keys}");
+            assert_eq!(notice.as_deref(), Some("Close the preview first"), "{keys}");
+            assert!(scratchpad_focused(&ws, cx), "{keys}");
+        }
+        let preview_focused = |cx: &mut gpui::VisualTestContext| {
+            ws.update_in(cx, |ws, window, _| ws.preview_focus.is_focused(window))
+        };
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(preview_focused(cx));
+        assert!(!page_focused(&ws, cx));
+        // Ctrl+Shift+\ from the scratchpad goes back to the preview too.
+        cx.simulate_keystrokes("secondary-shift-\\");
+        cx.run_until_parked();
+        assert!(scratchpad_focused(&ws, cx));
+        cx.simulate_keystrokes("secondary-shift-\\");
+        cx.run_until_parked();
+        assert!(preview_focused(cx));
     }
 
     #[gpui::test]

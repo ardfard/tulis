@@ -5,7 +5,8 @@ use std::ops::Range;
 
 use gpui::{
     App, Context, Entity, Focusable, IntoElement, MouseMoveEvent, ParentElement, Pixels, Render,
-    SharedString, Styled, Subscription, Window, anchored, div, point, prelude::*, px, relative,
+    SharedString, Styled, Subscription, WeakEntity, Window, anchored, div, point, prelude::*, px,
+    relative,
 };
 use gpui_component::input::{InputEvent, Textarea, TextareaState};
 
@@ -15,11 +16,14 @@ use crate::theme::Theme;
 use crate::workspace::Workspace;
 
 pub const SCRATCHPAD_WIDTH: f32 = 260.;
+const CLOSE_PREVIEW: &str = "Close the preview first";
 /// Space left of the text field for the blocks' `⠿` grips.
 const GRIP_GUTTER: f32 = 18.;
 
 pub struct Scratchpad {
     editor: Entity<Editor>,
+    /// For the Markdown preview, which hides the page.
+    workspace: WeakEntity<Workspace>,
     /// The text field. Its value mirrors `doc.overflow`; it keeps its own undo history.
     pub(crate) input: Entity<TextareaState>,
     /// The block under the pointer, whose grip is showing.
@@ -86,7 +90,12 @@ fn block_lines(text: &str, blocks: Vec<Range<usize>>) -> Vec<(Range<usize>, usiz
 }
 
 impl Scratchpad {
-    pub fn new(editor: Entity<Editor>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        editor: Entity<Editor>,
+        workspace: WeakEntity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Ctrl+Shift+X stashes the selection or paragraph here.")
@@ -107,6 +116,7 @@ impl Scratchpad {
         ];
         Self {
             editor,
+            workspace,
             input,
             hovered: None,
             seen_gen,
@@ -222,9 +232,29 @@ impl Scratchpad {
         });
     }
 
+    /// Whether the Markdown preview hides the page.
+    fn preview_open(&self, cx: &App) -> bool {
+        self.workspace
+            .upgrade()
+            .is_some_and(|ws| ws.read(cx).preview)
+    }
+
+    /// With the preview open, the page can't take text: say so. Returns true then.
+    fn refuse_under_preview(&self, cx: &mut Context<Self>) -> bool {
+        let open = self.preview_open(cx);
+        if open {
+            self.editor
+                .update(cx, |e, cx| e.set_notice(CLOSE_PREVIEW, cx));
+        }
+        open
+    }
+
     /// Ctrl+Enter: move the field's selection, or the block at its cursor, to the page cursor,
-    /// and focus the page.
+    /// and focus the page. Not while the preview hides the page.
     fn use_block(&mut self, _: &OverflowUse, window: &mut Window, cx: &mut Context<Self>) {
+        if self.refuse_under_preview(cx) {
+            return;
+        }
         let selected = self.input.read(cx).selected_range();
         let used = self
             .editor
@@ -237,15 +267,21 @@ impl Scratchpad {
 
     /// Ctrl+Shift+Enter: the same, but the text stays here and so does the focus.
     fn copy_block(&mut self, _: &OverflowCopy, _: &mut Window, cx: &mut Context<Self>) {
+        if self.refuse_under_preview(cx) {
+            return;
+        }
         let selected = self.input.read(cx).selected_range();
         self.editor
             .update(cx, |e, cx| e.use_overflow_selection(selected, true, cx));
     }
 
-    /// Esc: back to the page (the panel stays open).
+    /// Esc: back to the page, or the preview while it is open (the panel stays open).
     fn focus_page(&mut self, _: &FocusPage, window: &mut Window, cx: &mut Context<Self>) {
-        let page = self.editor.focus_handle(cx);
-        window.focus(&page, cx);
+        let main = match self.workspace.upgrade() {
+            Some(ws) => ws.read(cx).main_focus(cx),
+            None => self.editor.focus_handle(cx),
+        };
+        window.focus(&main, cx);
     }
 
     pub(crate) fn has_focus(&self, window: &Window, cx: &App) -> bool {
@@ -317,9 +353,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<Scratchpad> {
-        let editor = self.editor.clone();
+        let (editor, workspace) = (self.editor.clone(), cx.entity().downgrade());
         self.scratchpad
-            .get_or_insert_with(|| cx.new(|cx| Scratchpad::new(editor, window, cx)))
+            .get_or_insert_with(|| cx.new(|cx| Scratchpad::new(editor, workspace, window, cx)))
             .clone()
     }
 
@@ -332,7 +368,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if self.scratchpad_focused(window, cx) {
-            self.focus_editor(window, cx);
+            window.focus(&self.main_focus(cx), cx);
         } else {
             self.show_overflow = true;
             let input = self.ensure_scratchpad(window, cx).read(cx).input.clone();
