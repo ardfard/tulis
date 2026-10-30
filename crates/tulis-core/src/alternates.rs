@@ -81,6 +81,33 @@ impl Paragraph {
     }
 }
 
+impl Paragraph {
+    /// The options of alternate `seg` in the active version, in stored order (option 0 is the
+    /// original). Empty when `seg` is not an alternate.
+    pub fn options_at(&self, seg: usize) -> Vec<(String, Source)> {
+        match self.segments().get(seg).map(|s| &s.kind) {
+            Some(SegKind::Alt { options, .. }) => options
+                .iter()
+                .map(|o| (o.text.clone(), o.source.clone()))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The rendered text (ghosts included) and source of every version, in stored order.
+    pub fn version_texts(&self) -> Vec<(String, Source)> {
+        self.versions
+            .iter()
+            .map(|v| {
+                (
+                    v.segments.iter().map(Segment::text).collect(),
+                    v.source.clone(),
+                )
+            })
+            .collect()
+    }
+}
+
 impl Document {
     /// Find the alternate exactly covering `range`, or turn `range` into a one-option alternate.
     /// Returns the segment index.
@@ -141,6 +168,107 @@ impl Document {
             }));
         }
         Ok(p.segment_ranges()[seg].clone())
+    }
+
+    /// Append a human-written option to the group at `range` (creating the group if needed) and
+    /// show it. Returns the group's span.
+    pub fn add_option(
+        &mut self,
+        para: usize,
+        range: Range<usize>,
+        text: String,
+    ) -> Result<Range<usize>, OpError> {
+        if text.is_empty() {
+            return Err(OpError::NothingHere);
+        }
+        let seg = self.ensure_alt(para, range)?;
+        let p = &mut self.paragraphs[para];
+        if let SegKind::Alt { options, active } = &mut p.segments_mut()[seg].kind {
+            options.push(AltOption::human(text));
+            *active = options.len() - 1;
+        }
+        Ok(p.segment_ranges()[seg].clone())
+    }
+
+    /// Show option `index` of alternate `seg`. Returns the group's span afterwards.
+    pub fn set_active_option(
+        &mut self,
+        para: usize,
+        seg: usize,
+        index: usize,
+    ) -> Option<Range<usize>> {
+        let p = self.paragraphs.get_mut(para)?;
+        match &mut p.segments_mut().get_mut(seg)?.kind {
+            SegKind::Alt { options, active } if index < options.len() => *active = index,
+            _ => return None,
+        }
+        Some(p.segment_ranges()[seg].clone())
+    }
+
+    /// Show version `index` of paragraph `para`. Returns false when there is no such version.
+    pub fn set_active_version(&mut self, para: usize, index: usize) -> bool {
+        match self.paragraphs.get_mut(para) {
+            Some(p) if index < p.versions.len() => {
+                p.active = index;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Remove option `index` of alternate `seg`, never the last one. A group left with one
+    /// option becomes plain text. Returns the span of the group (or its text) afterwards.
+    pub fn remove_option_at(
+        &mut self,
+        para: usize,
+        seg: usize,
+        index: usize,
+    ) -> Option<Range<usize>> {
+        let p = self.paragraphs.get_mut(para)?;
+        let start = p.segment_ranges().get(seg)?.start;
+        let segment = p.segments_mut().get_mut(seg)?;
+        let remaining = match &mut segment.kind {
+            SegKind::Alt { options, active } if options.len() > 1 && index < options.len() => {
+                options.remove(index);
+                if index < *active || *active >= options.len() {
+                    *active -= 1;
+                }
+                (options.len() == 1).then(|| options[0].text.clone())
+            }
+            _ => return None,
+        };
+        if let Some(text) = remaining {
+            segment.kind = SegKind::Plain(text);
+        }
+        let len = segment.text().len();
+        normalize_segments(p.segments_mut());
+        Some(start..start + len)
+    }
+
+    /// Remove version `index` of paragraph `para`, never the last one.
+    pub fn remove_version(&mut self, para: usize, index: usize) -> bool {
+        let Some(p) = self.paragraphs.get_mut(para) else {
+            return false;
+        };
+        if p.versions.len() < 2 || index >= p.versions.len() {
+            return false;
+        }
+        p.versions.remove(index);
+        if index < p.active || p.active >= p.versions.len() {
+            p.active -= 1;
+        }
+        true
+    }
+
+    /// Append a human-written version with `text` and show it. Returns its index.
+    pub fn add_version(&mut self, para: usize, text: String) -> usize {
+        let p = &mut self.paragraphs[para];
+        p.versions.push(ParaVersion {
+            segments: vec![Segment::plain(text, false)],
+            source: Source::Human,
+        });
+        p.active = p.versions.len() - 1;
+        p.active
     }
 
     /// Clone the active version as a new, active version. Returns its index.
@@ -479,6 +607,82 @@ mod tests {
         assert_eq!(d.paragraphs[0].text(), "I adore tea");
         assert!(d.paragraphs[0].segments()[1].active_is_ai());
         assert_eq!(options(&d, 1).0.len(), 3);
+    }
+
+    #[test]
+    fn add_option_creates_the_group_once_and_shows_the_new_option() {
+        let mut d = doc();
+        assert_eq!(d.add_option(0, 2..6, "adore".into()), Ok(2..7));
+        assert_eq!(d.paragraphs[0].text(), "I adore tea");
+        assert_eq!(options(&d, 1), (vec!["love".into(), "adore".into()], 1));
+        assert_eq!(d.add_option(0, 2..7, "like".into()), Ok(2..6));
+        assert_eq!(options(&d, 1).0.len(), 3);
+        assert_eq!(
+            d.add_option(0, 2..6, String::new()),
+            Err(OpError::NothingHere)
+        );
+        assert_eq!(
+            d.add_option(0, 3..3, "x".into()),
+            Err(OpError::EmptySelection)
+        );
+    }
+
+    #[test]
+    fn options_at_lists_options_in_stored_order() {
+        let mut d = doc();
+        assert!(d.paragraphs[0].options_at(0).is_empty());
+        d.add_ai_alternates(0, 2..6, vec!["adore".into()], ai())
+            .unwrap();
+        let listed = d.paragraphs[0].options_at(1);
+        assert_eq!(listed[0], ("love".to_string(), Source::Human));
+        assert_eq!(listed[1].0, "adore");
+        assert!(listed[1].1.is_ai());
+    }
+
+    #[test]
+    fn set_active_option_and_version() {
+        let mut d = doc();
+        d.add_option(0, 2..6, "adore".into()).unwrap();
+        assert_eq!(d.set_active_option(0, 1, 0), Some(2..6));
+        assert_eq!(d.paragraphs[0].text(), "I love tea");
+        assert_eq!(d.set_active_option(0, 1, 5), None);
+        assert_eq!(d.set_active_option(0, 0, 0), None);
+        d.add_version(0, "Tea, I love.".into());
+        assert!(d.set_active_version(0, 0));
+        assert_eq!(d.paragraphs[0].text(), "I love tea");
+        assert!(!d.set_active_version(0, 2));
+    }
+
+    #[test]
+    fn remove_option_at_keeps_the_shown_option_and_collapses_at_one() {
+        let mut d = doc();
+        d.add_option(0, 2..6, "adore".into()).unwrap();
+        d.add_option(0, 2..7, "like".into()).unwrap();
+        // Showing "like" (2); removing "love" (0) keeps "like" shown.
+        assert_eq!(d.remove_option_at(0, 1, 0), Some(2..6));
+        assert_eq!(options(&d, 1), (vec!["adore".into(), "like".into()], 1));
+        // Removing the shown option shows the one before it.
+        assert_eq!(d.remove_option_at(0, 1, 1), Some(2..7));
+        assert_eq!(d.paragraphs[0].text(), "I adore tea");
+        assert_eq!(
+            d.paragraphs[0].segments(),
+            &[Segment::plain("I adore tea", false)]
+        );
+        assert_eq!(d.remove_option_at(0, 0, 0), None);
+    }
+
+    #[test]
+    fn versions_are_listed_added_and_removed_but_never_the_last() {
+        let mut d = doc();
+        assert_eq!(d.add_version(0, "Tea, I love.".into()), 1);
+        assert_eq!(d.paragraphs[0].text(), "Tea, I love.");
+        let listed = d.paragraphs[0].version_texts();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0], ("I love tea".to_string(), Source::Human));
+        assert!(d.remove_version(0, 0));
+        assert_eq!(d.paragraphs[0].active, 0);
+        assert_eq!(d.paragraphs[0].text(), "Tea, I love.");
+        assert!(!d.remove_version(0, 0));
     }
 
     #[test]
