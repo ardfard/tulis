@@ -30,18 +30,19 @@ paragraph that still matches and tells you how many paragraphs lost theirs.
 | `Ctrl+Shift+\` | Move focus between the page and the scratchpad (opens it); `Esc` in the scratchpad returns to the page |
 | `Ctrl+Enter` / `Ctrl+Shift+Enter` (in the scratchpad) | Move / copy its selection, or the block at its cursor, to the page cursor. Or drag a block's `⠿` grip onto the page (hold `Ctrl` to copy) |
 | `Ctrl+Shift+G` (or `Ctrl+J`) | AI alternatives for the selection, else the paragraph (as versions); an open sidebar follows to that target. In the sidebar (or its "✦ Ask AI" row): for the sidebar's target |
-| `Ctrl+Shift+T` / `Ctrl+Shift+Alt+T` | AI trim suggestions for the paragraph / document; `Tab` accepts (ghosts), `Esc` dismisses |
+| `Ctrl+Shift+T` / `Ctrl+Shift+Alt+T` | The Lab on the cursor's paragraph / the whole document |
+| `Tab` / `Shift+Tab` | Next / previous trim cut or Lab mark |
 | `Ctrl+Alt+V` | Toggle vim mode |
 | `Ctrl+K T` | Cycle theme (Midnight, Paper, Sepia, Black) for the session |
 | `Ctrl+.` | Show/hide alternate and version markers |
 | `Ctrl+Shift+M` | Markdown preview (`Esc` closes) |
 | `Ctrl+?` | Cheat sheet |
 | Right-click (or `Shift+F10` / the Menu key, at the caret) | Menu: Alternatives / AI alternatives for the selection (or the word under the pointer), Ghost it / Revive it, Stash this in Overflow |
-| `Ctrl+L` | The Lab (runs the document trim until Part 4) |
+| `Ctrl+L` | The Lab (or click LAB): on the selection's paragraphs, else the whole document. Arrows or `j`/`k` and `Enter` pick a guide check or a trim level; `Esc` closes it (and stops a run in progress) |
 | `Ctrl+S` / `Ctrl+Shift+S` / `Ctrl+O` / `Ctrl+N` / `Ctrl+Q` | Save / Save as / Open / New / Quit |
 
 Vim mode: `h j k l w b e 0 ^ $ gg G { }` with counts; `i a I A o O`; `d c y` + motion, `dd cc yy`,
-`x p P u Ctrl+R`; `v`/`V`; `]a`/`[a` cycle alternates; `gh` toggles ghost; `ga` sidebar, `gA` AI alternatives, `gs` stash (in Visual mode these act on the selection); `gt gm gp g? gl gx gX`
+`x p P u Ctrl+R`; `v`/`V`; `]a`/`[a` cycle alternates; `]m`/`[m` next/previous Lab cut or mark; `gh` toggles ghost; `ga` sidebar, `gA` AI alternatives, `gs` stash (in Visual mode these act on the selection); `gt gm gp g? gl gx gX`
 (theme, markers, preview, cheat sheet, Lab, Overflow, focus Overflow). In `V` (VisualLine) mode `ga gA gs gh` act on whole paragraphs; `Vgs` removes them, like `Vd`.
 
 Sentence tab: sentences end at `.`, `!` or `?` followed by a space or the end of the paragraph.
@@ -61,7 +62,7 @@ vim_mode = false
 font_family = "IBM Plex Mono"   # falls back to IBM Plex Mono, JetBrains Mono, then the platform mono font
 font_size = 18
 theme = "midnight"              # midnight | paper | sepia | black (Ctrl+K T cycles for the session)
-long_sentence_words = 30        # used by the Lab (Part 4)
+long_sentence_words = 30        # the Lab's "Mark sentences that run long" check
 
 [ai]
 provider = "openai"                         # any OpenAI-compatible endpoint, or "anthropic"
@@ -92,7 +93,7 @@ cargo test --workspace
 - [ ] Overflow: stash, panel toggle, type in the scratchpad, Ctrl+Enter / drag back to the page
 - [ ] Save/Open round-trips alternates, ghosts, overflow; external edit shows drift notice
 - [ ] Unsaved-changes prompt on New/Open/Quit/window close
-- [ ] AI alternates (violet underline) and trim (red strike, Tab/Esc) with a real key; missing key notice without
+- [ ] AI alternates (violet underline) and a Lab trim preview (faded cuts) with a real key; missing key notice without
 - [ ] Vim mode: motions, operators, visual, `]a`, `gh`, `ga` (sidebar), `gA` (AI alternatives), `gs` (stash), also from `v`/`V` (`V` acts on whole paragraphs); `vim_mode = true` starts in Normal
 - [ ] A missing font family falls back to a readable font
 - [ ] Midnight theme on first start; Ctrl+K T / `gt` cycles Midnight → Paper → Sepia → Black with a toast; buttons and dialogs follow the theme
@@ -105,7 +106,7 @@ cargo test --workspace
 - [ ] Header fades after ~2s of continuous typing and returns on mouse move or a 2s pause
 - [ ] Ctrl+Shift+M / `gp` shows the Markdown preview without ghosts; Esc returns
 - [ ] Ctrl+? / `g?` / keyboard icon opens the cheat sheet; typing filters; Esc closes
-- [ ] Footer: Save and Open work; Share X/in copy the text and open the browser (X trims to 280 with a toast); LAB runs the trim; XYZ toggles Overflow
+- [ ] Footer: Save and Open work; Share X/in copy the text and open the browser (X trims to 280 with a toast); LAB opens the Lab; XYZ toggles Overflow
 - [ ] Toasts appear centered above the footer, at most two, and fade after ~3s
 - [ ] Vim mode shows a NORMAL/INSERT badge next to the counts
 - [ ] Ctrl+Shift+A / Ctrl+D / `ga` opens a 240px sidebar on the left; while it has focus the page dims except the target paragraph; tabs read Word (Selection with a selection), Sentence, Paragraph in italic accent
@@ -117,7 +118,7 @@ cargo test --workspace
 - [ ] Delete / `dd` removes the highlighted option but never the last; Esc closes and keeps what is shown
 - [ ] Deleting the target paragraph (or typing inside the target) closes the sidebar
 - [ ] Right-click a word: the menu targets it (or the selection); Ghost it turns into Revive it on ghosted text; Stash moves it to Overflow
-- [ ] Ctrl+Z / Ctrl+Shift+Z work while the sidebar has focus; Esc on the page (with no AI request, trims or alternate edit pending) closes the sidebar
+- [ ] Ctrl+Z / Ctrl+Shift+Z work while the sidebar has focus; Esc on the page (with no AI request, Lab preview or marks, or alternate edit pending) closes the sidebar
 - [ ] Shift+F10 or the Menu key opens the right-click menu at the caret
 - [ ] XYZ / Ctrl+\ / `gx` opens a 260px Overflow panel on the right: italic "Overflow" title, a text field, and "ctrl+↵ or drag into the page to use" below it
 - [ ] Ctrl+Shift+X / `gs` / the menu stash appends after a blank line with a "Stashed to Overflow" toast and doesn't open the panel; `Vgs` leaves no empty paragraph
@@ -126,6 +127,19 @@ cargo test --workspace
 - [ ] Hovering a block shows a `⠿` grip next to its first line; dragging it onto the page inserts it where it's dropped (Ctrl held copies)
 - [ ] Ctrl+Shift+\ / `gX` moves focus page ↔ scratchpad; Esc in the scratchpad returns to the page
 - [ ] A file saved by an older Tulis opens with its overflow items joined into the scratchpad; saving writes sidecar version 2
+- [ ] LAB / Ctrl+L / `gl` opens the Lab above the LAB button with focus in it: "The Lab guide…", six checks, five trim buttons; arrows or `j`/`k` move, Enter runs, Esc closes and returns focus to the page
+- [ ] "what each idea does" expands a one-line description under each check
+- [ ] Ctrl+Shift+T scopes the Lab to the cursor's paragraph, Ctrl+Shift+Alt+T to the whole document, a selection to its paragraphs
+- [ ] A trim level fades the words it would cut; the bar reads "<Level> N → M words · −P%" and "Faded words would go. Click one to keep it."
+- [ ] Clicking a faded passage (or Enter in it) keeps it; clicking it again fades it again; Tab / `]m` / `[m` move between active cuts
+- [ ] Make the cuts ghosts every faded passage with a "Cut N passages" toast; one Ctrl+Z brings them all back
+- [ ] Walk through selects each cut in turn ("Cut i of n"): `y`/Enter cuts, `n`/Backspace keeps, Esc stops; afterwards `y`/`n` type again
+- [ ] Done (or Esc) clears the preview with no change; choosing a level again is instant (cached)
+- [ ] Each mark check tints its passages; the bar shows "N marked · <check>" and the note under the cursor; Tab / `]m` / `[m` move between marks; Clear removes them
+- [ ] "Mark sentences that run long" works without an API key, using `long_sentence_words`
+- [ ] Ctrl+Shift+G with the cursor in a mark asks for alternatives to the mark
+- [ ] "Fix punctuation and typos" shows each fix as an AI alternate (Alt+↑/↓ compares) with "N fixes proposed"; one Ctrl+Z undoes them all
+- [ ] Closing the Lab (Esc, click outside) while it works shows "Lab stopped" and sends no further requests; a partial failure toasts "N of M paragraphs failed"
 
 ## License
 
