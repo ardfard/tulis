@@ -23,6 +23,7 @@ use gpui::{
 use tulis_core::ai::LlmProvider;
 use tulis_core::config::Config;
 use tulis_core::history::{EditKind, History};
+use tulis_core::overflow::{OverflowOp, Replayed};
 use tulis_core::vim::{Mode, Vim};
 use tulis_core::{DocPos, Document, ParaId, Selection};
 
@@ -34,7 +35,20 @@ use layout::LayoutCache;
 use crate::theme::{self, Theme};
 use crate::toast::{TOAST_FADE_AT, TOAST_LIFETIME, ToastQueue};
 
+/// An undo snapshot: the page, without the scratchpad (`doc.overflow` is left empty), and the
+/// selection. Page commands that change the scratchpad record an `OverflowOp` with their step.
 pub type Snapshot = (Document, Selection);
+
+/// The undo snapshot of `doc`, leaving its scratchpad text out (and uncopied).
+fn page_snapshot(doc: &mut Document, selection: Selection) -> Snapshot {
+    let overflow = std::mem::take(&mut doc.overflow);
+    let page = doc.clone();
+    doc.overflow = overflow;
+    (page, selection)
+}
+
+const EDITED_STASH: &str = "Stashed text was edited in Overflow; kept it there";
+const EDITED_TAKE: &str = "Used text was edited in Overflow; kept it there";
 
 /// Events the workspace listens for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,7 +112,11 @@ pub struct Editor {
     pub(crate) is_selecting: bool,
     pub(crate) register: String,
     pub(crate) register_linewise: bool,
-    pub(crate) history: History<Snapshot>,
+    pub(crate) history: History<Snapshot, OverflowOp>,
+    /// Bumped whenever `doc.overflow` changes, so the scratchpad knows when to re-read it.
+    pub(crate) overflow_gen: u64,
+    /// The newest change to `doc.overflow` appended a block at its end (a stash).
+    pub(crate) overflow_appended: bool,
     /// The sidebar's focus handles (its list and text field), set by the workspace.
     pub(crate) sidebar_focus: Vec<FocusHandle>,
     focus_handle: FocusHandle,
@@ -142,6 +160,8 @@ impl Editor {
             register: String::new(),
             register_linewise: false,
             history: History::new(HISTORY_LIMIT),
+            overflow_gen: 0,
+            overflow_appended: false,
             sidebar_focus: Vec::new(),
             focus_handle: cx.focus_handle(),
         };
@@ -156,6 +176,7 @@ impl Editor {
         self.doc = doc;
         self.selection = Selection::default();
         self.history = History::new(HISTORY_LIMIT);
+        self.overflow_changed(false);
         self.trims.clear();
         self.alt_edit = None;
         self.cycled = None;
@@ -286,10 +307,29 @@ impl Editor {
     /// Record an undo step (call before mutating) and drop trim suggestions in the touched
     /// paragraphs (`touched` is a range of paragraph indices).
     pub(crate) fn begin_edit(&mut self, kind: EditKind, touched: Range<usize>) {
-        let (doc, selection) = (&self.doc, self.selection);
-        self.history
-            .record(kind, Instant::now(), || (doc.clone(), selection));
+        self.record_step(kind);
         self.drop_transient(touched);
+    }
+
+    /// Record an undo step (call before mutating).
+    pub(crate) fn record_step(&mut self, kind: EditKind) {
+        let (doc, selection) = (&mut self.doc, self.selection);
+        self.history
+            .record(kind, Instant::now(), || page_snapshot(doc, selection));
+    }
+
+    /// Note a change to `doc.overflow`; `appended` when it added a block at the end.
+    pub(crate) fn overflow_changed(&mut self, appended: bool) {
+        self.overflow_gen += 1;
+        self.overflow_appended = appended;
+    }
+
+    /// Restore an undo snapshot's page, keeping the scratchpad as it is.
+    fn restore_page(&mut self, (doc, selection): Snapshot) {
+        let overflow = std::mem::take(&mut self.doc.overflow);
+        self.doc = doc;
+        self.doc.overflow = overflow;
+        self.selection = selection;
     }
 
     /// Drop the cycled box and the trim suggestions in the touched paragraphs (`touched` is a
@@ -495,29 +535,57 @@ impl Editor {
     }
 
     pub(crate) fn undo_steps(&mut self, count: usize, cx: &mut Context<Self>) {
-        self.finish_alt_edit();
-        for _ in 0..count.max(1) {
-            let current = (self.doc.clone(), self.selection);
-            let Some((doc, selection)) = self.history.undo(current) else {
-                break;
-            };
-            self.doc = doc;
-            self.selection = selection;
-        }
-        self.after_history(cx);
+        self.step_history(count, false, cx);
     }
 
     pub(crate) fn redo_steps(&mut self, count: usize, cx: &mut Context<Self>) {
+        self.step_history(count, true, cx);
+    }
+
+    /// Undo (or redo) up to `count` steps. Pages come back from snapshots; the scratchpad
+    /// isn't in them, so the ops recorded with the steps are replayed on it as it is now.
+    fn step_history(&mut self, count: usize, redo: bool, cx: &mut Context<Self>) {
         self.finish_alt_edit();
+        let mut changed = false;
+        let mut appended = false;
+        let mut kept = None;
         for _ in 0..count.max(1) {
-            let current = (self.doc.clone(), self.selection);
-            let Some((doc, selection)) = self.history.redo(current) else {
-                break;
+            let current = page_snapshot(&mut self.doc, self.selection);
+            let doc = &mut self.doc;
+            let replay = |op: Option<OverflowOp>| {
+                let op = op?;
+                let (how, next) = if redo {
+                    doc.redo_overflow(&op)
+                } else {
+                    doc.undo_overflow(&op)
+                };
+                match how {
+                    Replayed::Kept => {
+                        kept = Some(match op {
+                            OverflowOp::Stash { .. } => EDITED_STASH,
+                            OverflowOp::Take { .. } => EDITED_TAKE,
+                        })
+                    }
+                    Replayed::Appended => (changed, appended) = (true, true),
+                    Replayed::Exact | Replayed::Moved => (changed, appended) = (true, false),
+                }
+                next
             };
-            self.doc = doc;
-            self.selection = selection;
+            let step = if redo {
+                self.history.redo_with(current, replay)
+            } else {
+                self.history.undo_with(current, replay)
+            };
+            let Some(snapshot) = step else { break };
+            self.restore_page(snapshot);
+        }
+        if changed {
+            self.overflow_changed(appended);
         }
         self.after_history(cx);
+        if let Some(notice) = kept {
+            self.set_notice(notice, cx);
+        }
     }
 
     fn after_history(&mut self, cx: &mut Context<Self>) {

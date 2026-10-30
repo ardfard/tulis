@@ -1015,6 +1015,20 @@ mod tests {
         assert_eq!(page, "Page Dragged.text.");
         assert_eq!(overflow, "Stays.");
         assert!(page_focused(&ws, cx));
+        // Typing in the scratchpad, then page undo: the block comes back, the typing stays.
+        focus_scratchpad(&ws, cx);
+        cx.simulate_keystrokes("ctrl-end");
+        cx.simulate_input(" more");
+        ws.update_in(cx, |ws, window, cx| ws.focus_editor(window, cx));
+        cx.simulate_keystrokes("secondary-z");
+        cx.run_until_parked();
+        let (page, overflow) = ws.read_with(cx, |ws, cx| {
+            let e = ws.editor.read(cx);
+            (e.doc.paragraphs[0].text(), e.doc.overflow.clone())
+        });
+        assert_eq!(page, "Page text.");
+        assert_eq!(overflow, "Stays. more\n\nDragged.");
+        assert_eq!(scratchpad_value(&ws, cx), overflow);
     }
 
     fn sidebar_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {

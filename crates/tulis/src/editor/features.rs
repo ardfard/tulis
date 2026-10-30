@@ -1,7 +1,6 @@
 //! Alternates, ghosting, overflow and trim-acceptance commands.
 
 use std::ops::Range;
-use std::time::Instant;
 
 use gpui::{Context, Pixels, Point, Window};
 use tulis_core::alternates::{AltLevel, OpError};
@@ -183,7 +182,10 @@ impl Editor {
             return self.set_notice(NOTHING_TO_STASH, cx);
         }
         self.begin_edit(EditKind::Other, sel.start.para..sel.end.para + 1);
-        self.doc.stash(sel.clone());
+        if let Some(op) = self.doc.stash(sel.clone()) {
+            self.history.set_op(op);
+            self.overflow_changed(true);
+        }
         self.selection = Selection::caret(sel.start);
         self.end_edit(cx);
         self.set_notice(STASHED, cx);
@@ -199,22 +201,24 @@ impl Editor {
             return self.set_notice(NOTHING_TO_STASH, cx);
         }
         self.begin_edit(EditKind::Other, paras.clone());
-        self.doc.stash_paragraphs(paras.clone());
+        if let Some(op) = self.doc.stash_paragraphs(paras.clone()) {
+            self.history.set_op(op);
+            self.overflow_changed(true);
+        }
         let para = paras.start.min(self.doc.paragraphs.len() - 1);
         self.selection = Selection::caret(DocPos::new(para, 0));
         self.end_edit(cx);
         self.set_notice(STASHED, cx);
     }
 
-    /// The scratchpad's own edits. They mark the document dirty but aren't page undo steps:
-    /// every stored step takes the new text, so page undo and redo leave it alone.
+    /// The scratchpad's own edits. They mark the document dirty but aren't page undo steps, and
+    /// page undo and redo leave them alone (see `step_history`).
     pub fn set_overflow(&mut self, text: &str, cx: &mut Context<Self>) {
         if self.doc.overflow == text {
             return;
         }
         self.doc.overflow = text.to_string();
-        self.history
-            .for_each_state(|(doc, _)| doc.overflow = text.to_string());
+        self.overflow_changed(false);
         self.dirty = true;
         cx.notify();
     }
@@ -242,7 +246,10 @@ impl Editor {
         self.insert_text(&text, cx);
         self.history.break_coalescing();
         if !copy {
-            self.doc.take_overflow(range);
+            // The insert's undo step carries the take, so undo can put the text back.
+            let op = self.doc.take_overflow(range);
+            self.history.set_op(op);
+            self.overflow_changed(false);
         }
         cx.notify();
         true
@@ -318,9 +325,7 @@ impl Editor {
             return;
         };
         // Not `begin_edit`: ghosting doesn't change rendered text, so the other suggestions stay valid.
-        let (doc, selection) = (&self.doc, self.selection);
-        self.history
-            .record(EditKind::Other, Instant::now(), || (doc.clone(), selection));
+        self.record_step(EditKind::Other);
         match self.doc.set_ghost(para, trim.range, true) {
             Ok(range) => {
                 self.selection = Selection::caret(DocPos::new(para, range.end));

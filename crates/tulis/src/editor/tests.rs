@@ -1570,3 +1570,146 @@ fn visual_line_stash_removes_the_paragraphs_like_visual_line_delete(cx: &mut Tes
     type_str(&editor, cx, "Vgs");
     assert_eq!(texts(&editor, cx), vec![""]);
 }
+
+fn overflow_of(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> String {
+    editor.read_with(cx, |e, _| e.doc.overflow.clone())
+}
+
+fn undo_page(editor: &Entity<Editor>, cx: &mut VisualTestContext) {
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+}
+
+fn redo_page(editor: &Entity<Editor>, cx: &mut VisualTestContext) {
+    editor.update_in(cx, |e, window, cx| e.redo(&Redo, window, cx));
+}
+
+#[gpui::test]
+fn undoing_a_move_after_a_scratchpad_edit_puts_the_block_back(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Page."]);
+    editor.update(cx, |e, _| {
+        e.doc.overflow = "Keep.\n\nPrecious block.".into()
+    });
+    // Ctrl+Enter in "Precious block.".
+    assert!(editor.update(cx, |e, cx| e.use_overflow_selection(9..9, false, cx)));
+    assert_eq!(texts(&editor, cx), vec!["Precious block.Page."]);
+    assert_eq!(overflow_of(&editor, cx), "Keep.");
+    editor.update(cx, |e, cx| e.set_overflow("Keep. more", cx));
+    undo_page(&editor, cx);
+    assert_eq!(texts(&editor, cx), vec!["Page."]);
+    // The text around the gap changed: the block comes back as a new one at the end.
+    assert_eq!(overflow_of(&editor, cx), "Keep. more\n\nPrecious block.");
+    redo_page(&editor, cx);
+    assert_eq!(texts(&editor, cx), vec!["Precious block.Page."]);
+    assert_eq!(overflow_of(&editor, cx), "Keep. more");
+}
+
+#[gpui::test]
+fn redoing_a_stash_after_a_scratchpad_edit_keeps_both(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Stash me.", "Keep."]);
+    editor.update_in(cx, |e, window, cx| {
+        e.send_to_overflow(&SendToOverflow, window, cx)
+    });
+    assert_eq!(overflow_of(&editor, cx), "Stash me.");
+    undo_page(&editor, cx);
+    assert_eq!(texts(&editor, cx), vec!["Stash me.", "Keep."]);
+    assert_eq!(overflow_of(&editor, cx), "");
+    editor.update(cx, |e, cx| e.set_overflow("note", cx));
+    redo_page(&editor, cx);
+    assert_eq!(texts(&editor, cx), vec!["Keep."]);
+    assert_eq!(overflow_of(&editor, cx), "note\n\nStash me.");
+}
+
+#[gpui::test]
+fn stash_undo_redo_round_trips_the_scratchpad(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["a", "b"]);
+    editor.update(cx, |e, _| e.doc.overflow = "older".into());
+    editor.update_in(cx, |e, window, cx| {
+        e.send_to_overflow(&SendToOverflow, window, cx)
+    });
+    assert_eq!(overflow_of(&editor, cx), "older\n\na");
+    undo_page(&editor, cx);
+    assert_eq!(overflow_of(&editor, cx), "older");
+    redo_page(&editor, cx);
+    assert_eq!(texts(&editor, cx), vec!["b"]);
+    assert_eq!(overflow_of(&editor, cx), "older\n\na");
+    undo_page(&editor, cx);
+    assert_eq!(texts(&editor, cx), vec!["a", "b"]);
+    assert_eq!(overflow_of(&editor, cx), "older");
+}
+
+#[gpui::test]
+fn undoing_a_stash_whose_text_was_edited_keeps_the_edit(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Stash me.", "Keep."]);
+    editor.update_in(cx, |e, window, cx| {
+        e.send_to_overflow(&SendToOverflow, window, cx)
+    });
+    editor.update(cx, |e, cx| e.set_overflow("Stash me, edited.", cx));
+    undo_page(&editor, cx);
+    assert_eq!(texts(&editor, cx), vec!["Stash me.", "Keep."]);
+    assert_eq!(overflow_of(&editor, cx), "Stash me, edited.");
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.last_notice().map(str::to_string)),
+        Some("Stashed text was edited in Overflow; kept it there".into())
+    );
+    // Redo removes the paragraph again but leaves the scratchpad alone.
+    redo_page(&editor, cx);
+    assert_eq!(texts(&editor, cx), vec!["Keep."]);
+    assert_eq!(overflow_of(&editor, cx), "Stash me, edited.");
+}
+
+#[gpui::test]
+fn take_undo_redo_keeps_the_scratchpad_edits_around_it(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &[""]);
+    let far = "x".repeat(40);
+    editor.update(cx, |e, _| {
+        e.doc.overflow = format!("Alpha.\n\nBeta.\n\nGamma.{far}")
+    });
+    assert!(editor.update(cx, |e, cx| e.use_overflow_selection(9..9, false, cx)));
+    assert_eq!(texts(&editor, cx), vec!["Beta."]);
+    assert_eq!(overflow_of(&editor, cx), format!("Alpha.\n\nGamma.{far}"));
+    // An edit away from the gap: undo puts the block back where it was.
+    editor.update(cx, |e, cx| {
+        e.set_overflow(&format!("Alpha.\n\nGamma.{far} later"), cx)
+    });
+    undo_page(&editor, cx);
+    assert_eq!(texts(&editor, cx), vec![""]);
+    assert_eq!(
+        overflow_of(&editor, cx),
+        format!("Alpha.\n\nBeta.\n\nGamma.{far} later")
+    );
+    redo_page(&editor, cx);
+    assert_eq!(texts(&editor, cx), vec!["Beta."]);
+    assert_eq!(
+        overflow_of(&editor, cx),
+        format!("Alpha.\n\nGamma.{far} later")
+    );
+    undo_page(&editor, cx);
+    assert_eq!(
+        overflow_of(&editor, cx),
+        format!("Alpha.\n\nBeta.\n\nGamma.{far} later")
+    );
+}
+
+#[gpui::test]
+fn undoing_a_drop_after_a_scratchpad_edit_puts_the_block_back(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["One two."]);
+    editor.update(cx, |e, _| e.doc.overflow = "Block.\n\nOther.".into());
+    cx.run_until_parked();
+    let point = editor.read_with(cx, |e, _| {
+        let layout = e.layout.as_ref().expect("painted");
+        let p = layout.window_point(DocPos::new(0, 4)).unwrap();
+        gpui::point(p.x + gpui::px(1.), p.y + layout.line_height / 2.)
+    });
+    assert!(editor.update(cx, |e, cx| e.drop_overflow(
+        0..6,
+        "Block.",
+        point,
+        false,
+        cx
+    )));
+    assert_eq!(overflow_of(&editor, cx), "Other.");
+    editor.update(cx, |e, cx| e.set_overflow("Other. Edited.", cx));
+    undo_page(&editor, cx);
+    assert_eq!(texts(&editor, cx), vec!["One two."]);
+    assert_eq!(overflow_of(&editor, cx), "Other. Edited.\n\nBlock.");
+}

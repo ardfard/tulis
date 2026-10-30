@@ -270,7 +270,7 @@ mod tests {
         d.make_alt(0, 2..6).unwrap();
         d.edit_alt(0, 1, 0..4, "adore");
         d.toggle_ghost(2, 0..9).unwrap();
-        assert!(d.stash(DocPos::new(1, 6)..DocPos::new(1, 16)));
+        assert!(d.stash(DocPos::new(1, 6)..DocPos::new(1, 16)).is_some());
         d
     }
 
