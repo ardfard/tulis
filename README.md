@@ -20,25 +20,26 @@ paragraph that still matches and tells you how many paragraphs lost theirs.
 
 | Key | Action |
 |---|---|
-| `Ctrl+D` | Make an alternate of the selection (then type the new wording), or a new version of the paragraph |
+| `Ctrl+Shift+A` (or `Ctrl+D`) | Alternatives sidebar for the selection or the word under the cursor: Word/Selection, Sentence and Paragraph tabs; `↑/↓` or `j/k` preview, `Enter` keeps, `Delete` or `dd` removes, `i`/`o` type a new option, `Esc` closes |
 | `Alt+↑` / `Alt+↓` | Cycle alternates or paragraph versions |
 | `Ctrl+Enter` | Accept: keep only the shown alternate/version |
 | `Ctrl+Shift+Backspace` | Delete the shown alternate/version |
-| `Ctrl+G` | Ghost / revive the selection or paragraph |
-| `Ctrl+Shift+O` | Move the selection or paragraph to overflow |
+| `Ctrl+/` (or `Ctrl+G`) | Ghost / revive the selection or paragraph |
+| `Ctrl+Shift+X` (or `Ctrl+Shift+O`) | Stash the selection or paragraph in overflow |
 | `Ctrl+\` | Show/hide the overflow panel |
-| `Ctrl+J` | AI alternates for the selection or paragraph |
+| `Ctrl+Shift+G` (or `Ctrl+J`) | AI alternatives for the sidebar's target, else the selection or paragraph |
 | `Ctrl+Shift+T` / `Ctrl+Shift+Alt+T` | AI trim suggestions for the paragraph / document; `Tab` accepts (ghosts), `Esc` dismisses |
 | `Ctrl+Alt+V` | Toggle vim mode |
 | `Ctrl+K T` | Cycle theme (Midnight, Paper, Sepia, Black) for the session |
 | `Ctrl+.` | Show/hide alternate and version markers |
 | `Ctrl+Shift+M` | Markdown preview (`Esc` closes) |
 | `Ctrl+?` | Cheat sheet |
+| Right-click | Menu: Alternatives / AI alternatives for the selection (or the word under the pointer), Ghost it / Revive it, Stash this in Overflow |
 | `Ctrl+L` | The Lab (runs the document trim until Part 4) |
 | `Ctrl+S` / `Ctrl+Shift+S` / `Ctrl+O` / `Ctrl+N` / `Ctrl+Q` | Save / Save as / Open / New / Quit |
 
 Vim mode: `h j k l w b e 0 ^ $ gg G { }` with counts; `i a I A o O`; `d c y` + motion, `dd cc yy`,
-`x p P u Ctrl+R`; `v`/`V`; `]a`/`[a` cycle alternates; `gh` toggles ghost; `gt gm gp g? gl gx`
+`x p P u Ctrl+R`; `v`/`V`; `]a`/`[a` cycle alternates; `gh` toggles ghost; `ga` sidebar, `gA` AI alternatives, `gs` stash (in Visual mode these act on the selection); `gt gm gp g? gl gx`
 (theme, markers, preview, cheat sheet, Lab, Overflow).
 
 The footer has Save, Open, Share to X and LinkedIn, LAB and XYZ (Overflow) buttons.
@@ -79,8 +80,8 @@ cargo test --workspace
 - [ ] Copy/cut/paste, undo/redo (typing undoes in chunks)
 - [ ] IME composition (e.g. Japanese/Chinese input method) shows underlined marked text and commits
 - [ ] Caret stays visible when typing past the bottom; scrolling with the wheel works
-- [ ] `Ctrl+D` → type → `Alt+↑/↓` swaps; dotted underline on alternates; `alt i/n` badge in the header
-- [ ] `Ctrl+G` ghosts to ~10% and back; ghosted text absent from saved `.md`
+- [ ] `Alt+↑/↓` swaps a group's options; dotted underline on alternates; `alt i/n` badge in the header
+- [ ] `Ctrl+/` (and `Ctrl+G`) ghosts to ~10% and back; ghosted text absent from saved `.md`
 - [ ] Overflow: send, panel toggle, click to insert, × to remove, "keep after insert"
 - [ ] Save/Open round-trips alternates, ghosts, overflow; external edit shows drift notice
 - [ ] Unsaved-changes prompt on New/Open/Quit/window close
@@ -91,7 +92,7 @@ cargo test --workspace
 - [ ] Unknown `theme` in config shows a toast and uses Midnight
 - [ ] Text column is 640px and centered; text fades out under the top and bottom edges while scrolling
 - [ ] A first paragraph starting with `# ` is bold and its `# ` is invisible (but the cursor still moves over it)
-- [ ] Alternates show a dotted underline (accent when AI-written); paragraphs with versions show a bar left of the column with a `⋮` handle; clicking the handle shows the next version
+- [ ] Alternates show a dotted underline (accent when AI-written); paragraphs with versions show a bar left of the column with a `⋮` handle; clicking the handle opens the sidebar on its Paragraph tab
 - [ ] Alt+↓ draws a faint box around the cycled group until the cursor leaves it
 - [ ] Ctrl+. / `gm` hides and shows all markers
 - [ ] Header fades after ~2s of continuous typing and returns on mouse move or a 2s pause
@@ -104,3 +105,12 @@ cargo test --workspace
 ## License
 
 [MIT](LICENSE).
+- [ ] Ctrl+Shift+A / Ctrl+D / `ga` opens a 240px sidebar on the left; the page dims except the target paragraph; tabs read Word (Selection with a selection), Sentence, Paragraph in italic accent
+- [ ] Rows show `●` for the shown option, `·` for the others and `✦` for AI-written ones; long options clip at 3 lines
+- [ ] j/k or arrows preview options in the page; one Ctrl+Z after closing undoes the whole preview session
+- [ ] Typing in "type another way to say it…" + Enter adds and shows the option; opening and closing without adding leaves no group behind
+- [ ] Adding on the Sentence tab over a word group toasts "Inner alternates merged — Ctrl+Z to restore"
+- [ ] "✦ Ask AI" (or Ctrl+Shift+G in the sidebar) appends AI options to the tab's target
+- [ ] Delete / `dd` removes the highlighted option but never the last; Esc closes and keeps what is shown
+- [ ] Deleting the target paragraph (or typing inside the target) closes the sidebar
+- [ ] Right-click a word: the menu targets it (or the selection); Ghost it turns into Revive it on ghosted text; Stash moves it to Overflow
