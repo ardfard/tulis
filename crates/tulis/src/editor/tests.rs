@@ -352,7 +352,7 @@ fn dropping_a_block_puts_it_where_it_lands(cx: &mut TestAppContext) {
         gpui::point(p.x + gpui::px(1.), p.y + layout.line_height / 2.)
     });
     let overflow = |cx: &mut VisualTestContext| editor.read_with(cx, |e, _| e.doc.overflow.clone());
-    // The scratchpad changed under the drag: nothing happens.
+    // The scratchpad changed under the drag: nothing happens but a toast.
     assert!(!editor.update(cx, |e, cx| e.drop_overflow(
         0..6,
         "Blocks",
@@ -360,6 +360,11 @@ fn dropping_a_block_puts_it_where_it_lands(cx: &mut TestAppContext) {
         false,
         cx
     )));
+    assert_eq!(texts(&editor, cx), vec!["One two.", "Three."]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.last_notice().map(str::to_string)),
+        Some("Overflow changed — drag again".into())
+    );
     assert!(editor.update(cx, |e, cx| e.drop_overflow(
         0..6,
         "Block.",

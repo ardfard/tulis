@@ -13,6 +13,7 @@ use crate::actions::*;
 const STASHED: &str = "Stashed to Overflow";
 const NOTHING_TO_STASH: &str = "Nothing to move to overflow";
 const NOTHING_TO_USE: &str = "Nothing to use here";
+const OVERFLOW_CHANGED: &str = "Overflow changed — drag again";
 
 impl Editor {
     /// The selection within one paragraph, or the cursor's whole paragraph when nothing is selected.
@@ -257,7 +258,7 @@ impl Editor {
 
     /// A scratchpad block dropped on the page at window `point`: it goes in at the position under
     /// the pointer, moved, or copied with `copy`. `range` and `text` are what the grip dragged;
-    /// if the scratchpad changed there since, nothing happens.
+    /// if the scratchpad changed there since, nothing happens but a toast.
     pub fn drop_overflow(
         &mut self,
         range: Range<usize>,
@@ -267,6 +268,7 @@ impl Editor {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.doc.overflow.get(range.clone()) != Some(text) {
+            self.set_notice(OVERFLOW_CHANGED, cx);
             return false;
         }
         let Some(layout) = self.current_layout() else {
