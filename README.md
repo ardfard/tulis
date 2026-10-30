@@ -1,7 +1,7 @@
 # Tulis
 
 A writing app for playing with your words: keep alternates inline, ghost passages to judge a
-paragraph without them, stash text in an overflow panel, and ask an AI for alternatives or cuts
+paragraph without them, stash text in an Overflow scratchpad, and ask an AI for alternatives or cuts
 (never rewrites). Built with Rust and [GPUI](https://www.gpui.rs/).
 
 ## Run
@@ -25,8 +25,10 @@ paragraph that still matches and tells you how many paragraphs lost theirs.
 | `Ctrl+Enter` | Accept: keep only the shown alternate/version |
 | `Ctrl+Shift+Backspace` | Delete the shown alternate/version |
 | `Ctrl+/` (or `Ctrl+G`) | Ghost / revive the selection or paragraph |
-| `Ctrl+Shift+X` (or `Ctrl+Shift+O`) | Stash the selection or paragraph in overflow |
-| `Ctrl+\` | Show/hide the overflow panel |
+| `Ctrl+Shift+X` (or `Ctrl+Shift+O`) | Stash the selection or paragraph in Overflow (appended after a blank line; the panel stays closed) |
+| `Ctrl+\` | Show/hide the Overflow scratchpad: free text, blocks separated by blank lines, with its own undo |
+| `Ctrl+Shift+\` | Move focus between the page and the scratchpad (opens it); `Esc` in the scratchpad returns to the page |
+| `Ctrl+Enter` / `Ctrl+Shift+Enter` (in the scratchpad) | Move / copy its selection, or the block at its cursor, to the page cursor. Or drag a block's `⠿` grip onto the page (hold `Ctrl` to copy) |
 | `Ctrl+Shift+G` (or `Ctrl+J`) | AI alternatives for the selection, else the paragraph (as versions); an open sidebar follows to that target. In the sidebar (or its "✦ Ask AI" row): for the sidebar's target |
 | `Ctrl+Shift+T` / `Ctrl+Shift+Alt+T` | AI trim suggestions for the paragraph / document; `Tab` accepts (ghosts), `Esc` dismisses |
 | `Ctrl+Alt+V` | Toggle vim mode |
@@ -39,8 +41,8 @@ paragraph that still matches and tells you how many paragraphs lost theirs.
 | `Ctrl+S` / `Ctrl+Shift+S` / `Ctrl+O` / `Ctrl+N` / `Ctrl+Q` | Save / Save as / Open / New / Quit |
 
 Vim mode: `h j k l w b e 0 ^ $ gg G { }` with counts; `i a I A o O`; `d c y` + motion, `dd cc yy`,
-`x p P u Ctrl+R`; `v`/`V`; `]a`/`[a` cycle alternates; `gh` toggles ghost; `ga` sidebar, `gA` AI alternatives, `gs` stash (in Visual mode these act on the selection); `gt gm gp g? gl gx`
-(theme, markers, preview, cheat sheet, Lab, Overflow). In `V` (VisualLine) mode `ga gA gs gh` act on whole paragraphs.
+`x p P u Ctrl+R`; `v`/`V`; `]a`/`[a` cycle alternates; `gh` toggles ghost; `ga` sidebar, `gA` AI alternatives, `gs` stash (in Visual mode these act on the selection); `gt gm gp g? gl gx gX`
+(theme, markers, preview, cheat sheet, Lab, Overflow, focus Overflow). In `V` (VisualLine) mode `ga gA gs gh` act on whole paragraphs; `Vgs` removes them, like `Vd`.
 
 Sentence tab: sentences end at `.`, `!` or `?` followed by a space or the end of the paragraph.
 Known gaps: a sentence ending in an abbreviation such as `etc.` or `e.g.` runs on into the next one;
@@ -87,7 +89,7 @@ cargo test --workspace
 - [ ] Caret stays visible when typing past the bottom; scrolling with the wheel works
 - [ ] `Alt+↑/↓` swaps a group's options; dotted underline on alternates; `alt i/n` badge in the header
 - [ ] `Ctrl+/` (and `Ctrl+G`) ghosts to ~10% and back; ghosted text absent from saved `.md`
-- [ ] Overflow: send, panel toggle, click to insert, × to remove, "keep after insert"
+- [ ] Overflow: stash, panel toggle, type in the scratchpad, Ctrl+Enter / drag back to the page
 - [ ] Save/Open round-trips alternates, ghosts, overflow; external edit shows drift notice
 - [ ] Unsaved-changes prompt on New/Open/Quit/window close
 - [ ] AI alternates (violet underline) and trim (red strike, Tab/Esc) with a real key; missing key notice without
@@ -117,6 +119,13 @@ cargo test --workspace
 - [ ] Right-click a word: the menu targets it (or the selection); Ghost it turns into Revive it on ghosted text; Stash moves it to Overflow
 - [ ] Ctrl+Z / Ctrl+Shift+Z work while the sidebar has focus; Esc on the page (with no AI request, trims or alternate edit pending) closes the sidebar
 - [ ] Shift+F10 or the Menu key opens the right-click menu at the caret
+- [ ] XYZ / Ctrl+\ / `gx` opens a 260px Overflow panel on the right: italic "Overflow" title, a text field, and "ctrl+↵ or drag into the page to use" below it
+- [ ] Ctrl+Shift+X / `gs` / the menu stash appends after a blank line with a "Stashed to Overflow" toast and doesn't open the panel; `Vgs` leaves no empty paragraph
+- [ ] Typing in the scratchpad marks the file unsaved; its Ctrl+Z undoes its own typing; page Ctrl+Z leaves it alone
+- [ ] Ctrl+Enter in the scratchpad moves the block at its cursor (or its selection) to the page cursor and focuses the page; one page Ctrl+Z puts it back; Ctrl+Shift+Enter copies and keeps focus
+- [ ] Hovering a block shows a `⠿` grip next to its first line; dragging it onto the page inserts it where it's dropped (Ctrl held copies)
+- [ ] Ctrl+Shift+\ / `gX` moves focus page ↔ scratchpad; Esc in the scratchpad returns to the page
+- [ ] A file saved by an older Tulis opens with its overflow items joined into the scratchpad; saving writes sidecar version 2
 
 ## License
 
