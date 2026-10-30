@@ -1031,6 +1031,95 @@ mod tests {
         assert_eq!(scratchpad_value(&ws, cx), overflow);
     }
 
+    fn scratchpad_caret(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> usize {
+        ws.read_with(cx, |ws, cx| {
+            let pad = ws.scratchpad.as_ref().unwrap();
+            pad.read(cx).input.read(cx).cursor()
+        })
+    }
+
+    fn set_scratchpad_caret(
+        ws: &gpui::Entity<Workspace>,
+        cx: &mut gpui::VisualTestContext,
+        at: usize,
+    ) {
+        let input = ws.read_with(cx, |ws, cx| {
+            ws.scratchpad.as_ref().unwrap().read(cx).input.clone()
+        });
+        input.update(cx, |input, cx| input.set_selected_range(at..at, cx));
+    }
+
+    #[gpui::test]
+    fn the_scratchpad_rereads_the_document_only_when_its_overflow_changed(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["Page."]);
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.update(cx, |e, _| e.doc.overflow = "Idea.".into());
+        cx.simulate_keystrokes("secondary-\\");
+        cx.run_until_parked();
+        focus_scratchpad(&ws, cx);
+        cx.simulate_keystrokes("ctrl-home right right");
+        cx.simulate_input("XY");
+        cx.run_until_parked();
+        // Its own changes don't come back to it: the caret stays after the typing.
+        assert_eq!(scratchpad_value(&ws, cx), "IdXYea.");
+        assert_eq!(scratchpad_caret(&ws, cx), 4);
+        // An editor notify alone doesn't make it re-read the text.
+        editor.update(cx, |e, cx| {
+            e.doc.overflow = "Changed quietly.".into();
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(scratchpad_value(&ws, cx), "IdXYea.");
+        editor.update(cx, |e, cx| {
+            e.overflow_changed(false);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(scratchpad_value(&ws, cx), "Changed quietly.");
+    }
+
+    #[gpui::test]
+    fn a_stash_shows_the_scratchpad_end_and_other_changes_keep_its_caret(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["Stash me.", "Keep."]);
+        cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(500.)));
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        let lines: Vec<String> = (0..80).map(|i| format!("Line {i}.")).collect();
+        let original = lines.join("\n");
+        editor.update(cx, |e, _| e.doc.overflow = original.clone());
+        cx.simulate_keystrokes("secondary-\\");
+        cx.run_until_parked();
+        set_scratchpad_caret(&ws, cx, 3);
+        cx.run_until_parked();
+        let scroll = |cx: &mut gpui::VisualTestContext| {
+            ws.read_with(cx, |ws, cx| {
+                let pad = ws.scratchpad.as_ref().unwrap();
+                pad.read(cx).input.read(cx).scroll_offset().y
+            })
+        };
+        assert_eq!(scroll(cx), gpui::px(0.));
+        // A stash from the page: the caret goes to the end, scrolled into view.
+        cx.simulate_keystrokes("secondary-shift-x");
+        cx.run_until_parked();
+        let value = scratchpad_value(&ws, cx);
+        assert_eq!(value, format!("{original}\n\nStash me."));
+        assert_eq!(scratchpad_caret(&ws, cx), value.len());
+        assert!(scroll(cx) < gpui::px(0.), "{:?}", scroll(cx));
+        // Page undo takes the block out again: the caret stays where it was.
+        set_scratchpad_caret(&ws, cx, 5);
+        cx.run_until_parked();
+        cx.simulate_keystrokes("secondary-z");
+        cx.run_until_parked();
+        assert_eq!(scratchpad_value(&ws, cx), original);
+        assert_eq!(scratchpad_caret(&ws, cx), 5);
+        // Past the new end, it is clamped.
+        cx.simulate_keystrokes("secondary-shift-z");
+        cx.run_until_parked();
+        set_scratchpad_caret(&ws, cx, value.len());
+        cx.simulate_keystrokes("secondary-z");
+        cx.run_until_parked();
+        assert_eq!(scratchpad_caret(&ws, cx), original.len());
+    }
+
     fn sidebar_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {
         let sidebar = ws.read_with(cx, |ws, _| ws.alt_sidebar.clone());
         sidebar.is_some_and(|s| cx.update(|window, cx| s.read(cx).list_focus.is_focused(window)))

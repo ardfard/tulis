@@ -24,6 +24,8 @@ pub struct Scratchpad {
     pub(crate) input: Entity<TextareaState>,
     /// The block under the pointer, whose grip is showing.
     pub(crate) hovered: Option<Range<usize>>,
+    /// The editor's `overflow_gen` the field last matched.
+    seen_gen: u64,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -67,13 +69,32 @@ impl Render for DragPreview {
     }
 }
 
+/// Each block with its first and last line numbers in `text`, counted in one pass.
+fn block_lines(text: &str, blocks: Vec<Range<usize>>) -> Vec<(Range<usize>, usize, usize)> {
+    let newlines = |s: &str| s.bytes().filter(|&b| b == b'\n').count();
+    let (mut line, mut counted) = (0, 0);
+    blocks
+        .into_iter()
+        .map(|range| {
+            line += newlines(&text[counted..range.start]);
+            let first = line;
+            line += newlines(&text[range.clone()]);
+            counted = range.end;
+            (range, first, line)
+        })
+        .collect()
+}
+
 impl Scratchpad {
     pub fn new(editor: Entity<Editor>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder("Ctrl+Shift+X stashes the selection or paragraph here.")
         });
-        let text = editor.read(cx).doc.overflow.clone();
+        let (text, seen_gen) = {
+            let e = editor.read(cx);
+            (e.doc.overflow.clone(), e.overflow_gen)
+        };
         input.update(cx, |input, cx| input.set_value(text, window, cx));
         let subscriptions = vec![
             // Page commands (stash, undo, open) change `doc.overflow`: show the new text.
@@ -88,6 +109,7 @@ impl Scratchpad {
             editor,
             input,
             hovered: None,
+            seen_gen,
             _subscriptions: subscriptions,
         }
     }
@@ -100,17 +122,12 @@ impl Scratchpad {
             return Vec::new();
         };
         let view = input.input_bounds();
-        let overflow = &self.editor.read(cx).doc.overflow;
+        let doc = &self.editor.read(cx).doc;
         let rows = input.display_map();
         let left = view.left() - px(GRIP_GUTTER);
-        self.editor
-            .read(cx)
-            .doc
-            .overflow_blocks()
+        block_lines(&doc.overflow, doc.overflow_blocks())
             .into_iter()
-            .filter_map(|range| {
-                let first = overflow[..range.start].matches('\n').count();
-                let last = first + overflow[range.clone()].matches('\n').count();
+            .filter_map(|(range, first, last)| {
                 let start = rows.buffer_line_to_display_row_range(first)?.start;
                 let end = rows.buffer_line_to_display_row_range(last)?.end;
                 // The text's origin moves with the scroll position.
@@ -166,18 +183,43 @@ impl Scratchpad {
     /// The field changed: store its text in the document.
     fn push(&mut self, cx: &mut Context<Self>) {
         let text = self.input.read(cx).value();
-        self.editor.update(cx, |e, cx| e.set_overflow(&text, cx));
+        let seen = self.seen_gen;
+        // The field now matches the document, unless a change it hasn't shown is pending.
+        self.seen_gen = self.editor.update(cx, |e, cx| {
+            let in_sync = e.overflow_gen == seen;
+            e.set_overflow(&text, cx);
+            if in_sync { e.overflow_gen } else { seen }
+        });
     }
 
-    /// The document's overflow changed elsewhere: show it. `set_value` emits no `Change`, and
-    /// starts the field's undo history afresh.
+    /// The document's overflow changed elsewhere: show it. After a stash the caret goes to the
+    /// end, in view; otherwise the caret and scroll position stay. `set_value` emits no
+    /// `Change`, and starts the field's undo history afresh.
     fn pull(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.editor.read(cx).doc.overflow.clone();
-        if self.input.read(cx).value().as_ref() != text {
-            self.input
-                .update(cx, |input, cx| input.set_value(text, window, cx));
-        }
         cx.notify();
+        let editor = self.editor.read(cx);
+        if editor.overflow_gen == self.seen_gen {
+            return;
+        }
+        self.seen_gen = editor.overflow_gen;
+        let (text, appended) = (editor.doc.overflow.clone(), editor.overflow_appended);
+        self.input.update(cx, |input, cx| {
+            if input.value().as_ref() == text {
+                return;
+            }
+            let (caret, scroll) = (input.cursor(), input.scroll_offset());
+            input.set_value(text, window, cx);
+            if appended {
+                let end = input.value().len();
+                input.set_selected_range(end..end, cx);
+                // Clamped to the bottom at the next layout.
+                input.set_scroll_offset(point(px(0.), px(-1_000_000.)), cx);
+            } else {
+                let caret = caret.min(input.value().len());
+                input.set_selected_range(caret..caret, cx);
+                input.set_scroll_offset(scroll, cx);
+            }
+        });
     }
 
     /// Ctrl+Enter: move the field's selection, or the block at its cursor, to the page cursor,
@@ -303,5 +345,21 @@ impl Workspace {
         self.scratchpad
             .as_ref()
             .is_some_and(|pad| pad.read(cx).has_focus(window, cx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::block_lines;
+
+    #[test]
+    fn block_lines_count_the_lines_before_and_in_each_block() {
+        let mut d = tulis_core::Document::new();
+        d.overflow = "\none\ntwo\n\n\nthree\n\nfour\nfive\nsix".into();
+        let lines: Vec<(usize, usize)> = block_lines(&d.overflow, d.overflow_blocks())
+            .into_iter()
+            .map(|(_, first, last)| (first, last))
+            .collect();
+        assert_eq!(lines, vec![(1, 2), (5, 5), (7, 9)]);
     }
 }
