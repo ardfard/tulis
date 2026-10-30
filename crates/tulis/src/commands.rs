@@ -452,6 +452,24 @@ pub static COMMANDS: &[Command] = &[
         Some("gx"),
         ToggleOverflowPanel
     ),
+    cmd!(
+        "focus_overflow",
+        "Focus page ↔ Overflow",
+        Overflow,
+        ["secondary-shift-\\", "secondary-|"],
+        None,
+        Some("gX"),
+        FocusOverflow
+    ),
+    cmd!(
+        "scratchpad_escape",
+        "Overflow: back to the page",
+        Hidden,
+        ["escape"],
+        Some("Scratchpad"),
+        None,
+        FocusPage
+    ),
     // In the scratchpad's text field, ahead of the field's own Ctrl+Enter (a line break).
     cmd!(
         "overflow_use",
@@ -711,6 +729,7 @@ mod tests {
             VimCommand::CheatSheet => "cheat_sheet",
             VimCommand::Lab => "open_lab",
             VimCommand::ToggleOverflow => "toggle_overflow",
+            VimCommand::FocusOverflow => "focus_overflow",
             VimCommand::Alternatives => "alternatives",
             VimCommand::AiAlternatives => "ai_alternates",
             VimCommand::Stash => "stash",
@@ -760,6 +779,7 @@ mod tests {
             VimCommand::CheatSheet,
             VimCommand::Lab,
             VimCommand::ToggleOverflow,
+            VimCommand::FocusOverflow,
             VimCommand::Alternatives,
             VimCommand::AiAlternatives,
             VimCommand::Stash,
@@ -811,6 +831,12 @@ mod tests {
         assert_eq!(theme[0].0, Group::View);
         assert_eq!(theme[0].1[0].vim, "gt");
         assert_eq!(cheat_sheet("gx")[0].1[0].label, "Show / hide Overflow");
+        let focus = &cheat_sheet("gX")[0].1;
+        assert!(
+            focus
+                .iter()
+                .any(|row| row.vim == "gX" && row.label == "Focus page ↔ Overflow")
+        );
         assert_eq!(cheat_sheet("linkedin")[0].1[0].key, "—");
         assert_eq!(cheat_sheet("ai alt")[0].1[0].label, "AI alternatives");
         assert!(cheat_sheet("zzzz").is_empty());

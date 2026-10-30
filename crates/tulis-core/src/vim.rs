@@ -107,6 +107,8 @@ pub enum VimCommand {
     Lab,
     /// `gx`: show or hide the Overflow panel.
     ToggleOverflow,
+    /// `gX`: move focus between the page and the Overflow scratchpad.
+    FocusOverflow,
     /// `ga`: the alternates sidebar for the selection or the word under the cursor.
     Alternatives,
     /// `gA`: AI alternatives for the selection or the cursor's paragraph.
@@ -124,6 +126,7 @@ fn g_view_command(c: char) -> Option<VimCommand> {
         '?' => VimCommand::CheatSheet,
         'l' => VimCommand::Lab,
         'x' => VimCommand::ToggleOverflow,
+        'X' => VimCommand::FocusOverflow,
         _ => return None,
     })
 }
@@ -661,6 +664,7 @@ mod tests {
         assert_eq!(feed(&mut v, "g?"), vec![CheatSheet]);
         assert_eq!(feed(&mut v, "gl"), vec![Lab]);
         assert_eq!(feed(&mut v, "gx"), vec![ToggleOverflow]);
+        assert_eq!(feed(&mut v, "gX"), vec![FocusOverflow]);
         assert_eq!(v.mode(), Mode::Normal);
     }
 

@@ -49,6 +49,8 @@ gpui::actions!(
         ToggleOverflowPanel,
         OverflowUse,
         OverflowCopy,
+        FocusOverflow,
+        FocusPage,
         AiAlternates,
         AiTrimParagraph,
         AiTrimDocument,

@@ -10,7 +10,8 @@ use tulis_core::{DocPos, Selection};
 
 use super::Editor;
 use crate::actions::{
-    AiAlternates, SendToOverflow, ShowCheatSheet, ToggleOverflowPanel, TogglePreview, ToggleVim,
+    AiAlternates, FocusOverflow, SendToOverflow, ShowCheatSheet, ToggleOverflowPanel,
+    TogglePreview, ToggleVim,
 };
 
 /// Commands that act on the selection; from Visual mode they get its inclusive end.
@@ -274,6 +275,7 @@ impl Editor {
             VimCommand::TogglePreview => window.dispatch_action(Box::new(TogglePreview), cx),
             VimCommand::CheatSheet => window.dispatch_action(Box::new(ShowCheatSheet), cx),
             VimCommand::ToggleOverflow => window.dispatch_action(Box::new(ToggleOverflowPanel), cx),
+            VimCommand::FocusOverflow => window.dispatch_action(Box::new(FocusOverflow), cx),
         }
     }
 

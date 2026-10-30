@@ -318,6 +318,7 @@ impl Render for Workspace {
                 }
             }))
             .on_action(cx.listener(Self::toggle_overflow))
+            .on_action(cx.listener(Self::toggle_overflow_focus))
             .on_action(cx.listener(Self::cycle_theme))
             .on_action(cx.listener(Self::toggle_markers))
             .on_action(cx.listener(Self::open_lab))
@@ -907,6 +908,59 @@ mod tests {
         assert_eq!(page_text(cx), "Idea.Page.");
         assert_eq!(scratchpad_value(&ws, cx), "Idea.");
         assert!(!page_focused(&ws, cx));
+    }
+
+    fn scratchpad_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {
+        ws.update_in(cx, |ws, window, cx| ws.scratchpad_focused(window, cx))
+    }
+
+    #[gpui::test]
+    fn ctrl_shift_backslash_moves_focus_between_the_page_and_the_scratchpad(
+        cx: &mut TestAppContext,
+    ) {
+        let (ws, cx) = root_workspace(cx, &["Page."]);
+        cx.simulate_keystrokes("secondary-shift-\\");
+        cx.run_until_parked();
+        assert!(ws.read_with(cx, |ws, _| ws.show_overflow));
+        assert!(scratchpad_focused(&ws, cx));
+        cx.simulate_keystrokes("secondary-shift-\\");
+        cx.run_until_parked();
+        assert!(page_focused(&ws, cx));
+        cx.simulate_keystrokes("secondary-shift-\\");
+        cx.run_until_parked();
+        assert!(scratchpad_focused(&ws, cx));
+        // Typing goes into the scratchpad, not the page.
+        cx.simulate_input("note");
+        assert_eq!(scratchpad_value(&ws, cx), "note");
+        let page = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.paragraphs[0].text());
+        assert_eq!(page, "Page.");
+    }
+
+    #[gpui::test]
+    fn escape_in_the_scratchpad_returns_to_the_page(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["Page."]);
+        cx.simulate_keystrokes("secondary-shift-\\");
+        cx.run_until_parked();
+        assert!(scratchpad_focused(&ws, cx));
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(page_focused(&ws, cx));
+        // The panel stays open.
+        assert!(ws.read_with(cx, |ws, _| ws.show_overflow));
+    }
+
+    #[gpui::test]
+    fn vim_g_shift_x_focuses_the_scratchpad(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["Page."]);
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.update_in(cx, |e, window, cx| {
+            e.vim = Some(tulis_core::vim::Vim::new());
+            e.replace_text_in_range(None, "g", window, cx);
+            e.replace_text_in_range(None, "X", window, cx);
+        });
+        cx.run_until_parked();
+        assert!(ws.read_with(cx, |ws, _| ws.show_overflow));
+        assert!(scratchpad_focused(&ws, cx));
     }
 
     fn sidebar_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {

@@ -7,7 +7,7 @@ use gpui::{
 };
 use gpui_component::input::{InputEvent, Textarea, TextareaState};
 
-use crate::actions::{OverflowCopy, OverflowUse};
+use crate::actions::{FocusOverflow, FocusPage, OverflowCopy, OverflowUse};
 use crate::editor::Editor;
 use crate::workspace::Workspace;
 
@@ -81,6 +81,12 @@ impl Scratchpad {
             .update(cx, |e, cx| e.use_overflow_selection(selected, true, cx));
     }
 
+    /// Esc: back to the page (the panel stays open).
+    fn focus_page(&mut self, _: &FocusPage, window: &mut Window, cx: &mut Context<Self>) {
+        let page = self.editor.focus_handle(cx);
+        window.focus(&page, cx);
+    }
+
     pub(crate) fn has_focus(&self, window: &Window, cx: &App) -> bool {
         self.input.focus_handle(cx).is_focused(window)
     }
@@ -94,6 +100,7 @@ impl Render for Scratchpad {
             .key_context("Scratchpad")
             .on_action(cx.listener(Self::use_block))
             .on_action(cx.listener(Self::copy_block))
+            .on_action(cx.listener(Self::focus_page))
             .w(px(SCRATCHPAD_WIDTH))
             .flex_none()
             .h_full()
@@ -141,6 +148,24 @@ impl Workspace {
         self.scratchpad
             .get_or_insert_with(|| cx.new(|cx| Scratchpad::new(editor, window, cx)))
             .clone()
+    }
+
+    /// Ctrl+Shift+\, vim `gX`: focus the scratchpad (opening the panel), or the page when the
+    /// scratchpad has focus.
+    pub(crate) fn toggle_overflow_focus(
+        &mut self,
+        _: &FocusOverflow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.scratchpad_focused(window, cx) {
+            self.focus_editor(window, cx);
+        } else {
+            self.show_overflow = true;
+            let input = self.ensure_scratchpad(window, cx).read(cx).input.clone();
+            window.focus(&input.focus_handle(cx), cx);
+        }
+        cx.notify();
     }
 
     pub(crate) fn scratchpad_focused(&self, window: &Window, cx: &App) -> bool {
