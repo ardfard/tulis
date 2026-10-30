@@ -2,13 +2,13 @@
 //! the editor's `AltSession` describes.
 
 use gpui::{
-    App, Context, Entity, FocusHandle, IntoElement, ParentElement, Render, Styled, Subscription,
-    Window, div, prelude::*, px,
+    App, ClickEvent, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
+    Styled, Subscription, Window, div, prelude::*, px,
 };
 use gpui_component::Sizable;
 use gpui_component::tab::{Tab, TabBar};
 
-use crate::actions::CloseAlternates;
+use crate::actions::{AltKeep, AltNext, AltPrev, AltRemove, CloseAlternates};
 use crate::editor::{Editor, Scope};
 use crate::workspace::Workspace;
 
@@ -34,6 +34,41 @@ impl AltSidebar {
     /// Esc: close the sidebar, keeping the shown option (the workspace refocuses the page).
     fn close(&mut self, _: &CloseAlternates, _: &mut Window, cx: &mut Context<Self>) {
         self.editor.update(cx, |e, cx| e.close_alternates(cx));
+    }
+
+    fn next(&mut self, _: &AltNext, _: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, cx| e.move_alt_highlight(1, cx));
+    }
+
+    fn prev(&mut self, _: &AltPrev, _: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, cx| e.move_alt_highlight(-1, cx));
+    }
+
+    /// Enter (or a click): keep the highlighted option and return to the page. The sidebar
+    /// stays open.
+    fn keep(&mut self, _: &AltKeep, window: &mut Window, cx: &mut Context<Self>) {
+        let index = self.highlight(cx);
+        self.keep_row(index, window, cx);
+    }
+
+    fn keep_row(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, cx| e.keep_alternate(index, cx));
+        let page = self.editor.focus_handle(cx);
+        window.focus(&page, cx);
+    }
+
+    fn remove(&mut self, _: &AltRemove, _: &mut Window, cx: &mut Context<Self>) {
+        let index = self.highlight(cx);
+        self.editor
+            .update(cx, |e, cx| e.remove_alternate(index, cx));
+    }
+
+    fn highlight(&self, cx: &App) -> usize {
+        self.editor
+            .read(cx)
+            .alt_session
+            .as_ref()
+            .map_or(0, |s| s.highlight)
     }
 
     fn tab_label(scope: Scope, selection: bool) -> &'static str {
@@ -89,6 +124,10 @@ impl Render for AltSidebar {
                     .id("alt-list")
                     .key_context("AltList")
                     .track_focus(&self.list_focus)
+                    .on_action(cx.listener(Self::next))
+                    .on_action(cx.listener(Self::prev))
+                    .on_action(cx.listener(Self::keep))
+                    .on_action(cx.listener(Self::remove))
                     .flex_1()
                     .overflow_y_scroll()
                     .p_2()
@@ -105,7 +144,11 @@ impl Render for AltSidebar {
                             .px_2()
                             .py_1()
                             .rounded_md()
+                            .cursor_pointer()
                             .when(highlighted, |d| d.bg(t.selection))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.keep_row(ix, window, cx)
+                            }))
                             .child(
                                 div()
                                     .w(px(10.))

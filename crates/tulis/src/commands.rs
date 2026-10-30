@@ -297,6 +297,42 @@ pub static COMMANDS: &[Command] = &[
         CloseAlternates
     ),
     cmd!(
+        "alt_next",
+        "Sidebar: next option",
+        Hidden,
+        ["down", "j"],
+        Some("AltList"),
+        None,
+        AltNext
+    ),
+    cmd!(
+        "alt_prev",
+        "Sidebar: previous option",
+        Hidden,
+        ["up", "k"],
+        Some("AltList"),
+        None,
+        AltPrev
+    ),
+    cmd!(
+        "alt_keep",
+        "Sidebar: keep this option",
+        Hidden,
+        ["enter"],
+        Some("AltList"),
+        None,
+        AltKeep
+    ),
+    cmd!(
+        "alt_remove",
+        "Sidebar: remove this option",
+        Hidden,
+        ["delete", "d d"],
+        Some("AltList"),
+        None,
+        AltRemove
+    ),
+    cmd!(
         "cycle_next",
         "Next alternate",
         Alternates,

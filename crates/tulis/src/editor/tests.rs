@@ -887,3 +887,89 @@ fn vim_visual_ga_opens_the_selection_tab(cx: &mut TestAppContext) {
         Some(Mode::Normal)
     );
 }
+
+/// "I love tea" with options love / adore / like on 2..6, showing "love", cursor in the group.
+fn three_options(cx: &mut TestAppContext) -> (Entity<Editor>, &mut VisualTestContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    editor.update(cx, |e, _| {
+        e.doc.add_option(0, 2..6, "adore".into()).unwrap();
+        e.doc.add_option(0, 2..7, "like".into()).unwrap();
+        e.doc.set_active_option(0, 1, 0);
+        e.selection = Selection::caret(DocPos::new(0, 3));
+    });
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    (editor, cx)
+}
+
+#[gpui::test]
+fn previewing_shows_options_live_as_one_undo_step(cx: &mut TestAppContext) {
+    let (editor, cx) = three_options(cx);
+    editor.update(cx, |e, cx| e.move_alt_highlight(1, cx));
+    assert_eq!(texts(&editor, cx), vec!["I adore tea"]);
+    editor.update(cx, |e, cx| e.move_alt_highlight(1, cx));
+    assert_eq!(texts(&editor, cx), vec!["I like tea"]);
+    editor.update(cx, |e, cx| e.move_alt_highlight(1, cx)); // clamps at the last row
+    editor.update(cx, |e, cx| e.move_alt_highlight(-2, cx));
+    assert_eq!(texts(&editor, cx), vec!["I love tea"]);
+    editor.update(cx, |e, cx| e.move_alt_highlight(2, cx));
+    assert_eq!(
+        rows(&editor, cx),
+        vec![row("love", false), row("adore", false), row("like", true)]
+    );
+    // One undo undoes the whole preview session.
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["I love tea"]);
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["I love tea"]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.alt_info(DocPos::new(0, 3)).unwrap().count),
+        3
+    );
+}
+
+#[gpui::test]
+fn keeping_an_option_shows_it_and_moves_the_cursor_after_it(cx: &mut TestAppContext) {
+    let (editor, cx) = three_options(cx);
+    editor.update(cx, |e, cx| e.keep_alternate(1, cx));
+    assert_eq!(texts(&editor, cx), vec!["I adore tea"]);
+    editor.read_with(cx, |e, _| {
+        assert_eq!(e.cursor(), DocPos::new(0, 7));
+        assert!(e.alt_session.is_some(), "Enter keeps the sidebar open");
+    });
+}
+
+#[gpui::test]
+fn removing_options_never_removes_the_last_one(cx: &mut TestAppContext) {
+    let (editor, cx) = three_options(cx);
+    editor.update(cx, |e, cx| e.remove_alternate(1, cx));
+    assert_eq!(
+        rows(&editor, cx),
+        vec![row("love", true), row("like", false)]
+    );
+    editor.update(cx, |e, cx| e.remove_alternate(0, cx));
+    assert_eq!(texts(&editor, cx), vec!["I like tea"]);
+    assert_eq!(rows(&editor, cx), vec![row("like", true)]);
+    editor.update(cx, |e, cx| e.remove_alternate(0, cx));
+    assert_eq!(texts(&editor, cx), vec!["I like tea"]);
+    assert!(editor.read_with(cx, |e, _| !e.doc.paragraphs[0].has_metadata()));
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    // Undo changes the target's text, so the sidebar closes; the option is back.
+    assert_eq!(texts(&editor, cx), vec!["I love tea"]);
+}
+
+#[gpui::test]
+fn paragraph_tab_previews_and_removes_versions(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Draft one."]);
+    editor.update(cx, |e, cx| {
+        e.doc.add_version(0, "Draft two.".into());
+        e.open_alternates(Some(Scope::Paragraph), cx);
+    });
+    assert_eq!(
+        rows(&editor, cx),
+        vec![row("Draft one.", false), row("Draft two.", true)]
+    );
+    editor.update(cx, |e, cx| e.move_alt_highlight(-1, cx));
+    assert_eq!(texts(&editor, cx), vec!["Draft one."]);
+    editor.update(cx, |e, cx| e.remove_alternate(1, cx));
+    assert_eq!(rows(&editor, cx), vec![row("Draft one.", true)]);
+}

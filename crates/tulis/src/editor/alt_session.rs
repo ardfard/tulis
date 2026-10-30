@@ -6,9 +6,10 @@ use std::ops::Range;
 
 use gpui::{Context, Window};
 use tulis_core::alternates::OpError;
+use tulis_core::history::EditKind;
 use tulis_core::motion::word_range_at;
 use tulis_core::sentence::sentence_range_at;
-use tulis_core::{ParaId, SegKind};
+use tulis_core::{DocPos, ParaId, SegKind, Selection};
 
 use super::{Editor, EditorEvent};
 use crate::actions::OpenAlternates;
@@ -252,5 +253,117 @@ impl Editor {
         if !alive {
             self.close_alternates(cx);
         }
+    }
+}
+
+impl Editor {
+    /// Record the target's new range (and text) after an operation changed it.
+    fn update_alt_target(&mut self, para: usize, range: Range<usize>) {
+        let text = self.doc.paragraphs[para]
+            .text()
+            .get(range.clone())
+            .unwrap_or_default()
+            .to_string();
+        if let Some(session) = self.alt_session.as_mut() {
+            if session.scope == Scope::Word {
+                session.origin = if session.selection {
+                    range.clone()
+                } else {
+                    range.start..range.start
+                };
+            }
+            session.range = range;
+            session.text = text;
+        }
+    }
+
+    /// Highlight row `index` and show it in the page. A session's previews share one undo step
+    /// (recorded by the first; another recorded operation starts a new one).
+    pub fn preview_alternate(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some((para, seg)) = self.alt_session_target() else {
+            return;
+        };
+        let rows = self.alt_rows();
+        let Some(row) = rows.get(index) else {
+            return;
+        };
+        let Some(session) = self.alt_session.as_mut() else {
+            return;
+        };
+        session.highlight = index;
+        if row.shown {
+            return cx.notify();
+        }
+        let (scope, first_preview) = (session.scope, !session.previewed);
+        session.previewed = true;
+        if first_preview {
+            self.begin_edit(EditKind::Other, para..para + 1);
+        }
+        let range = match (scope, seg) {
+            (Scope::Paragraph, _) => {
+                self.doc.set_active_version(para, index);
+                0..self.doc.paragraphs[para].len()
+            }
+            (_, Some(seg)) => match self.doc.set_active_option(para, seg, index) {
+                Some(span) => span,
+                None => return,
+            },
+            _ => return,
+        };
+        self.update_alt_target(para, range.clone());
+        self.selection = Selection::caret(DocPos::new(para, range.end));
+        self.end_edit(cx);
+    }
+
+    /// Move the highlight by `delta` rows (clamped) and preview that row.
+    pub fn move_alt_highlight(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let Some(session) = self.alt_session.as_ref() else {
+            return;
+        };
+        let last = self.alt_rows().len().saturating_sub(1);
+        let index = session.highlight.saturating_add_signed(delta).min(last);
+        self.preview_alternate(index, cx);
+    }
+
+    /// Keep row `index`: show it and put the cursor at the end of the target.
+    pub fn keep_alternate(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.preview_alternate(index, cx);
+        if let Some((para, _)) = self.alt_session_target() {
+            let end = self.alt_session.as_ref().map_or(0, |s| s.range.end);
+            self.set_selection(Selection::caret(DocPos::new(para, end)), cx);
+        }
+    }
+
+    /// Remove row `index` (never the last one). A group left with one option becomes plain text.
+    pub fn remove_alternate(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some((para, seg)) = self.alt_session_target() else {
+            return;
+        };
+        if self.alt_rows().len() < 2 {
+            return;
+        }
+        let Some(scope) = self.alt_session.as_ref().map(|s| s.scope) else {
+            return;
+        };
+        self.begin_edit(EditKind::Other, para..para + 1);
+        let range = match (scope, seg) {
+            (Scope::Paragraph, _) if self.doc.remove_version(para, index) => {
+                0..self.doc.paragraphs[para].len()
+            }
+            (Scope::Word | Scope::Sentence, Some(seg)) => {
+                match self.doc.remove_option_at(para, seg, index) {
+                    Some(span) => span,
+                    None => return,
+                }
+            }
+            _ => return,
+        };
+        self.update_alt_target(para, range.clone());
+        if let Some(session) = self.alt_session.as_mut() {
+            session.previewed = false;
+        }
+        self.highlight_shown_row();
+        self.selection = Selection::caret(DocPos::new(para, range.end));
+        self.end_edit(cx);
     }
 }

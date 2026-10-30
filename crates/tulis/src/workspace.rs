@@ -891,6 +891,35 @@ mod tests {
     }
 
     #[gpui::test]
+    fn sidebar_keys_preview_keep_and_remove(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["I love tea"]);
+        ws.update(cx, |ws, cx| {
+            ws.editor.update(cx, |e, cx| {
+                e.doc.add_option(0, 2..6, "adore".into()).unwrap();
+                e.doc.add_option(0, 2..7, "like".into()).unwrap();
+                e.doc.set_active_option(0, 1, 0);
+                e.selection = Selection::caret(DocPos::new(0, 3));
+                e.open_alternates(None, cx);
+            })
+        });
+        cx.run_until_parked();
+        let text = |cx: &mut gpui::VisualTestContext| {
+            ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.paragraphs[0].text())
+        };
+        cx.simulate_keystrokes("j");
+        assert_eq!(text(cx), "I adore tea");
+        cx.simulate_keystrokes("down k j");
+        assert_eq!(text(cx), "I like tea");
+        cx.simulate_keystrokes("d d");
+        assert_eq!(text(cx), "I adore tea");
+        cx.simulate_keystrokes("up enter");
+        cx.run_until_parked();
+        assert_eq!(text(cx), "I love tea");
+        assert!(!sidebar_focused(&ws, cx));
+        assert!(ws.read_with(cx, |ws, cx| ws.editor.read(cx).alt_session.is_some()));
+    }
+
+    #[gpui::test]
     fn toasts_stack_two_and_expire(cx: &mut TestAppContext) {
         init(cx);
         let (ws, cx) = cx.add_window_view(|window, cx| {
