@@ -226,6 +226,15 @@ impl TrimPreview {
     }
 }
 
+/// What the editor's one AI task slot (`ai_task`) is running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AiTaskKind {
+    /// An AI alternates request (Ctrl+Shift+G and friends).
+    Alternates,
+    /// A Lab run (it has a cancel flag in `ai_cancel`).
+    Lab,
+}
+
 /// A button on the Lab bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarAction {
@@ -399,19 +408,58 @@ impl Editor {
         self.set_notice(working, cx);
     }
 
+    /// What the shared AI task slot is running, if anything. Only Lab runs have a cancel flag.
+    pub(crate) fn ai_task_kind(&self) -> Option<AiTaskKind> {
+        self.ai_task.as_ref()?;
+        Some(if self.ai_cancel.is_some() {
+            AiTaskKind::Lab
+        } else {
+            AiTaskKind::Alternates
+        })
+    }
+
     /// Stop the running AI request or Lab run: raise its cancel flag, so no further paragraph
-    /// is sent, and drop its task. Returns whether one was running.
-    pub(crate) fn stop_ai(&mut self) -> bool {
+    /// is sent, and drop its task. Returns what was running. A stopped Lab run emits no
+    /// `LabDone`; see `stop_ai_for_other_work` and `stop_ai_for_lab`.
+    pub(crate) fn stop_ai(&mut self) -> Option<AiTaskKind> {
+        let kind = self.ai_task_kind();
         if let Some(flag) = self.ai_cancel.take() {
             flag.store(true, Ordering::SeqCst);
         }
-        self.ai_task.take().is_some()
+        self.ai_task = None;
+        kind
+    }
+
+    /// Stop whatever AI task runs because something other than the Lab takes the slot (an
+    /// alternates request, a document load, Esc). A stopped Lab run closes the popover.
+    pub(crate) fn stop_ai_for_other_work(&mut self, cx: &mut Context<Self>) -> Option<AiTaskKind> {
+        let kind = self.stop_ai();
+        if kind == Some(AiTaskKind::Lab) {
+            cx.emit(EditorEvent::LabDone);
+        }
+        kind
+    }
+
+    /// Stop whatever AI task runs because a Lab choice replaces it (so an older run can't
+    /// overwrite it). A pending alternates request is dropped with a toast.
+    fn stop_ai_for_lab(&mut self, cx: &mut Context<Self>) {
+        if self.stop_ai() == Some(AiTaskKind::Alternates) {
+            self.set_notice("AI alternatives request stopped", cx);
+        }
+    }
+
+    /// Done and Clear stop a Lab run still working, but not an alternates request.
+    fn stop_lab_run(&mut self, cx: &mut Context<Self>) {
+        if self.lab_running() {
+            self.stop_ai_for_other_work(cx);
+        }
     }
 
     /// Preview trim `level` over the paragraphs in `scope` (ids of paragraphs that are gone are
     /// skipped): one request per non-empty paragraph, unless the cache has its answer.
     /// `Original` clears the preview.
     pub fn run_trim(&mut self, level: TrimLevel, scope: &[ParaId], cx: &mut Context<Self>) {
+        self.stop_ai_for_lab(cx);
         self.finish_alt_edit();
         if level == TrimLevel::Original {
             self.trim_preview = None;
@@ -587,12 +635,12 @@ impl Editor {
             BarAction::MakeCuts => self.make_cuts(cx),
             BarAction::Walk => self.start_walk(cx),
             BarAction::Done => {
-                self.stop_ai();
+                self.stop_lab_run(cx);
                 self.trim_preview = None;
                 cx.notify();
             }
             BarAction::Clear => {
-                self.stop_ai();
+                self.stop_lab_run(cx);
                 self.marks.clear();
                 self.lab_fixes = None;
                 cx.notify();
@@ -774,6 +822,7 @@ impl Editor {
     /// Run `check` over the paragraphs in `scope`. The long-sentence check is local; the others
     /// send one request per non-empty paragraph. The marks replace any marks or trim preview.
     pub fn run_check(&mut self, check: Check, scope: &[ParaId], cx: &mut Context<Self>) {
+        self.stop_ai_for_lab(cx);
         self.finish_alt_edit();
         let paras: Vec<usize> = scope
             .iter()

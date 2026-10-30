@@ -136,7 +136,7 @@ impl Editor {
             group,
             source,
         };
-        self.stop_ai();
+        self.stop_ai_for_other_work(cx);
         let work = cx.background_spawn(async move { provider.complete(&request) });
         self.ai_task = Some(cx.spawn(async move |this, cx| {
             let result = work.await;

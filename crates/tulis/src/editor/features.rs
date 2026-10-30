@@ -303,7 +303,7 @@ impl Editor {
     /// vim's Insert or Visual mode, or drop its pending keys). With none of that to do, close an
     /// open sidebar.
     pub(super) fn cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
-        if self.stop_ai() {
+        if self.stop_ai_for_other_work(cx).is_some() {
             return self.set_notice("AI request cancelled", cx);
         }
         if self.end_walk(cx) {

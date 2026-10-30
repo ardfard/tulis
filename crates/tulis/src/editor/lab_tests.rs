@@ -723,3 +723,92 @@ fn fixes_inside_one_group_make_one_option(cx: &mut TestAppContext) {
         Some("3 fixes proposed — Alt+↑/↓ to compare")
     );
 }
+
+#[gpui::test]
+fn a_newer_lab_choice_stops_an_older_run(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I think this one has more than five words in it."]);
+    mock(&editor, cx, &[r#"[{"text": "I think", "note": "hedge"}]"#]);
+    editor.update(cx, |e, _| e.config.editor.long_sentence_words = 5);
+    let all = ids(&editor, cx);
+    // Hedges is out; the local long-sentence check replaces it.
+    editor.update(cx, |e, cx| {
+        e.run_check(Check::Hedges, &all, cx);
+        e.run_check(Check::Long, &all, cx);
+    });
+    assert!(!editor.read_with(cx, |e, _| e.lab_running()));
+    cx.run_until_parked();
+    assert_eq!(marks(&editor, cx)[0].2, "11 words");
+    // A cached trim level replaces a pending check too, and its preview stays.
+    mock(&editor, cx, &[r#"["this one "]"#]);
+    editor.update(cx, |e, cx| e.run_trim(TrimLevel::Slight, &all, cx));
+    cx.run_until_parked();
+    assert_eq!(cut_ranges(&editor, cx), vec![(0, 8..17)]);
+    let mock = self::mock(&editor, cx, &[r#"[{"text": "I think", "note": "hedge"}]"#]);
+    editor.update(cx, |e, cx| {
+        e.run_check(Check::Hedges, &all, cx);
+        e.run_trim(TrimLevel::Slight, &all, cx);
+    });
+    assert!(!editor.read_with(cx, |e, _| e.lab_running()));
+    cx.run_until_parked();
+    assert!(mock.requests.lock().unwrap().len() <= 1);
+    assert_eq!(cut_ranges(&editor, cx), vec![(0, 8..17)]);
+    assert!(marks(&editor, cx).is_empty());
+    // Original stops a pending run as well.
+    let mock = self::mock(&editor, cx, &[r#"[{"text": "I think", "note": "hedge"}]"#]);
+    editor.update(cx, |e, cx| {
+        e.run_check(Check::Hedges, &all, cx);
+        e.run_trim(TrimLevel::Original, &all, cx);
+    });
+    cx.run_until_parked();
+    assert!(mock.requests.lock().unwrap().len() <= 1);
+    assert!(marks(&editor, cx).is_empty());
+}
+
+#[gpui::test]
+fn starting_a_lab_run_stops_a_pending_alternates_request(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I think it is fine."]);
+    mock(
+        &editor,
+        cx,
+        &[r#"["I hold"]"#, r#"[{"text": "I think", "note": "hedge"}]"#],
+    );
+    editor.update(cx, |e, _| {
+        e.selection = Selection {
+            anchor: DocPos::new(0, 0),
+            head: DocPos::new(0, 7),
+        }
+    });
+    editor.update_in(cx, |e, window, cx| {
+        e.ai_alternates(&AiAlternates, window, cx)
+    });
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 0)));
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Hedges, &all, cx));
+    assert!(editor.read_with(cx, |e, _| {
+        e.toasts
+            .iter()
+            .any(|t| t.text == "AI alternatives request stopped")
+    }));
+}
+
+#[gpui::test]
+fn done_and_clear_leave_a_pending_alternates_request_alone(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I think it is fine."]);
+    mock(&editor, cx, &[r#"["I hold"]"#]);
+    preview(&editor, cx, &[(0, 8..11)]);
+    editor.update(cx, |e, _| {
+        e.selection = Selection {
+            anchor: DocPos::new(0, 0),
+            head: DocPos::new(0, 7),
+        }
+    });
+    editor.update_in(cx, |e, window, cx| {
+        e.ai_alternates(&AiAlternates, window, cx)
+    });
+    editor.update(cx, |e, cx| {
+        e.bar_action(BarAction::Done, cx);
+        e.bar_action(BarAction::Clear, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["I hold it is fine."]);
+}

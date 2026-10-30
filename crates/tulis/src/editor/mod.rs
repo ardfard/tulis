@@ -198,7 +198,7 @@ impl Editor {
         self.trim_cache.clear();
         self.alt_edit = None;
         self.cycled = None;
-        self.stop_ai();
+        self.stop_ai_for_other_work(cx);
         self.marked = None;
         self.close_alternates(cx);
         self.goal_x = None;

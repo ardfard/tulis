@@ -1414,6 +1414,76 @@ mod tests {
     }
 
     #[gpui::test]
+    fn another_ai_request_or_a_load_closes_the_lab_while_it_works(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["One really.", "Two really."]);
+        lab_mock(&ws, cx, &[r#"["really"]"#, r#"["really"]"#, r#"["Uno"]"#]);
+        let lab = ws.read_with(cx, |ws, _| ws.lab.clone());
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        let start_trim = |cx: &mut gpui::VisualTestContext| {
+            cx.simulate_keystrokes("secondary-l");
+            draw(cx);
+            lab.update(cx, |lab, cx| {
+                lab.run(
+                    crate::lab_popover::LabItem::Trim(crate::editor::TrimLevel::Slight),
+                    cx,
+                )
+            });
+            assert!(lab_open(&ws, cx));
+        };
+        start_trim(cx);
+        editor.update(cx, |e, cx| {
+            e.selection = Selection {
+                anchor: DocPos::new(0, 0),
+                head: DocPos::new(0, 3),
+            };
+            e.ask_ai_alternates(cx);
+        });
+        cx.run_until_parked();
+        assert!(!lab_open(&ws, cx));
+        start_trim(cx);
+        editor.update(cx, |e, cx| {
+            e.load(tulis_core::Document::from_texts(&["Fresh."]), cx)
+        });
+        cx.run_until_parked();
+        assert!(!lab_open(&ws, cx));
+    }
+
+    #[gpui::test]
+    fn a_cached_trim_chosen_while_a_check_runs_closes_the_lab_and_stays(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["I really love tea."]);
+        lab_mock(
+            &ws,
+            cx,
+            &[r#"["really "]"#, r#"[{"text": "love", "note": "x"}]"#],
+        );
+        let lab = ws.read_with(cx, |ws, _| ws.lab.clone());
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        let run = |cx: &mut gpui::VisualTestContext, item| {
+            lab.update(cx, |lab, cx| lab.run(item, cx));
+        };
+        let slight = crate::lab_popover::LabItem::Trim(crate::editor::TrimLevel::Slight);
+        cx.simulate_keystrokes("secondary-l");
+        draw(cx);
+        run(cx, slight);
+        cx.run_until_parked();
+        assert!(!lab_open(&ws, cx));
+        cx.simulate_keystrokes("secondary-l");
+        draw(cx);
+        run(
+            cx,
+            crate::lab_popover::LabItem::Check(crate::editor::Check::Hedges),
+        );
+        assert!(lab_open(&ws, cx));
+        run(cx, slight);
+        assert!(!lab_open(&ws, cx));
+        cx.run_until_parked();
+        editor.read_with(cx, |e, _| {
+            assert!(e.trim_preview.is_some());
+            assert!(e.marks.is_empty());
+        });
+    }
+
+    #[gpui::test]
     fn the_bar_shows_a_trim_preview_and_its_buttons_work(cx: &mut TestAppContext) {
         let (ws, cx) = root_workspace(cx, &["I really love tea."]);
         draw(cx);
