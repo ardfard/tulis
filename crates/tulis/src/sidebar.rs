@@ -68,7 +68,7 @@ impl AltSidebar {
 
     /// Ctrl+Shift+G or the "✦ Ask AI" row: AI alternatives for this target.
     fn ask_ai(&mut self, _: &AiAlternates, _: &mut Window, cx: &mut Context<Self>) {
-        self.editor.update(cx, |e, cx| e.ask_ai_alternates(cx));
+        self.editor.update(cx, |e, cx| e.ask_ai_for_session(cx));
     }
 
     /// Esc: close the sidebar, keeping the shown option (the workspace refocuses the page).

@@ -1056,7 +1056,7 @@ fn asking_ai_from_the_sidebar_appends_ai_options_to_its_target(cx: &mut TestAppC
     with_mock(&editor, cx, vec![r#"["Tea is love.", "I adore tea."]"#]);
     editor.update(cx, |e, cx| {
         e.open_alternates(Some(Scope::Sentence), cx);
-        e.ask_ai_alternates(cx);
+        e.ask_ai_for_session(cx);
     });
     cx.run_until_parked();
     assert_eq!(texts(&editor, cx), vec!["Tea is love. Bye."]);
@@ -1272,4 +1272,57 @@ fn the_origin_follows_a_sentence_target(cx: &mut TestAppContext) {
         rows(&editor, cx),
         vec![row("Hello there.", false), row("Hi.", true)]
     );
+}
+
+#[gpui::test]
+fn page_ai_alternatives_use_the_selection_and_retarget_the_sidebar(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea. Bye."]);
+    with_mock(&editor, cx, vec![r#"["adore"]"#]);
+    editor.update(cx, |e, cx| e.open_alternates(Some(Scope::Sentence), cx));
+    select(&editor, cx, DocPos::new(0, 2), DocPos::new(0, 6));
+    editor.update_in(cx, |e, window, cx| {
+        e.ai_alternates(&AiAlternates, window, cx)
+    });
+    let session = editor.read_with(cx, |e, _| e.alt_session.clone()).unwrap();
+    assert_eq!(
+        (session.scope, session.selection, session.range),
+        (Scope::Word, true, 2..6)
+    );
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["I adore tea. Bye."]);
+    assert_eq!(
+        rows(&editor, cx),
+        vec![row("love", false), ("adore".to_string(), true, true)]
+    );
+}
+
+#[gpui::test]
+fn previewing_while_ai_works_still_adds_its_options_to_the_group(cx: &mut TestAppContext) {
+    let (editor, cx) = three_options(cx);
+    with_mock(&editor, cx, vec![r#"["cherish"]"#]);
+    editor.update(cx, |e, cx| {
+        e.ask_ai_for_session(cx);
+        e.preview_alternate(1, cx);
+    });
+    assert_eq!(texts(&editor, cx), vec!["I adore tea"]);
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["I cherish tea"]);
+    assert_eq!(rows(&editor, cx).len(), 4);
+    assert_eq!(rows(&editor, cx)[3], ("cherish".to_string(), true, true));
+}
+
+#[gpui::test]
+fn previewing_versions_while_ai_works_still_adds_its_versions(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Draft one."]);
+    with_mock(&editor, cx, vec![r#"["Draft three."]"#]);
+    editor.update(cx, |e, cx| {
+        e.doc.add_version(0, "Draft two.".into());
+        e.doc.set_active_version(0, 0);
+        e.open_alternates(Some(Scope::Paragraph), cx);
+        e.ask_ai_for_session(cx);
+        e.preview_alternate(1, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["Draft three."]);
+    assert_eq!(rows(&editor, cx).len(), 3);
 }

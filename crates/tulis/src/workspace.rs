@@ -991,6 +991,37 @@ mod tests {
     }
 
     #[gpui::test]
+    fn ctrl_shift_g_targets_the_sidebar_in_it_and_the_page_on_the_page(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["I love tea"]);
+        ws.update(cx, |ws, cx| {
+            ws.editor.update(cx, |e, cx| {
+                let responses = vec![Ok(r#"["adore"]"#.into()), Ok(r#"["Tea, I love."]"#.into())];
+                e.provider_override = Some(std::sync::Arc::new(tulis_core::ai::MockProvider::new(
+                    responses,
+                )));
+                e.selection = Selection::caret(DocPos::new(0, 3));
+                e.open_alternates(None, cx);
+            })
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("secondary-shift-g");
+        cx.run_until_parked();
+        let text = |cx: &mut gpui::VisualTestContext| {
+            ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.paragraphs[0].text())
+        };
+        assert_eq!(text(cx), "I adore tea");
+        // On the page, with a caret: the paragraph, and the sidebar follows to its Paragraph tab.
+        ws.update_in(cx, |ws, window, cx| ws.focus_editor(window, cx));
+        cx.simulate_keystrokes("secondary-shift-g");
+        cx.run_until_parked();
+        assert_eq!(text(cx), "Tea, I love.");
+        let scope = ws.read_with(cx, |ws, cx| {
+            ws.editor.read(cx).alt_session.as_ref().map(|s| s.scope)
+        });
+        assert_eq!(scope, Some(crate::editor::Scope::Paragraph));
+    }
+
+    #[gpui::test]
     fn toasts_stack_two_and_expire(cx: &mut TestAppContext) {
         init(cx);
         let (ws, cx) = cx.add_window_view(|window, cx| {

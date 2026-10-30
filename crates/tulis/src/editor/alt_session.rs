@@ -163,6 +163,35 @@ impl Editor {
         }
     }
 
+    /// Point an open sidebar at the page's target: `range` of paragraph `para` (Selection tab),
+    /// or the whole paragraph (Paragraph tab). Does nothing without a sidebar.
+    pub(crate) fn retarget_alt_session_to(
+        &mut self,
+        para: usize,
+        range: Range<usize>,
+        whole_paragraph: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let para_id = self.doc.paragraphs[para].id;
+        let caret = self.selection.head.offset;
+        let Some(session) = self.alt_session.as_mut() else {
+            return;
+        };
+        session.para_id = para_id;
+        session.preview_step = None;
+        if whole_paragraph {
+            session.scope = Scope::Paragraph;
+            session.selection = false;
+            session.origin = caret..caret;
+        } else {
+            session.scope = Scope::Word;
+            session.selection = true;
+            session.origin = range;
+        }
+        self.retarget_alt_session();
+        cx.notify();
+    }
+
     /// Recompute the target from the scope and origin, and highlight the shown row.
     fn retarget_alt_session(&mut self) {
         let Some(session) = self.alt_session.as_ref() else {

@@ -20,6 +20,9 @@ pub(crate) struct AlternatesJob {
     range: Range<usize>,
     original: String,
     whole_paragraph: bool,
+    /// The target was an existing group (or a paragraph with versions). Its result still
+    /// applies after another option is shown, as long as the group still holds `original`.
+    group: bool,
     source: Source,
 }
 
@@ -46,30 +49,62 @@ impl Editor {
         self.ask_ai_alternates(cx);
     }
 
-    /// AI alternatives for the sidebar's target while it is open, else for the selection (or the
-    /// cursor's paragraph, as versions).
-    pub fn ask_ai_alternates(&mut self, cx: &mut Context<Self>) {
+    /// The sidebar's own AI entry points ("✦ Ask AI", Ctrl+Shift+G in the sidebar): AI
+    /// alternatives for its target. Without a sidebar, the page's target.
+    pub fn ask_ai_for_session(&mut self, cx: &mut Context<Self>) {
         self.finish_alt_edit();
         let session = self.alt_session_target().zip(
             self.alt_session
                 .as_ref()
                 .map(|s| (s.scope, s.range.clone())),
         );
-        let (para, range, whole_paragraph) = match session {
+        match session {
             Some(((para, _), (Scope::Paragraph, _))) => {
-                (para, 0..self.doc.paragraphs[para].len(), true)
+                let len = self.doc.paragraphs[para].len();
+                self.request_ai_alternates(para, 0..len, true, cx)
             }
-            Some(((para, _), (_, range))) => (para, range, false),
-            None => match self.target_range() {
-                Ok((para, range)) => (para, range, self.selection.is_empty()),
-                Err(e) => return self.set_notice(e.to_string(), cx),
-            },
+            Some(((para, _), (_, range))) => self.request_ai_alternates(para, range, false, cx),
+            None => self.ask_ai_alternates(cx),
+        }
+    }
+
+    /// The page's AI alternatives (Editor action, vim `gA`, context menu): for the selection, or
+    /// the cursor's paragraph as versions. An open sidebar retargets to it first, so the results
+    /// show in its list.
+    pub fn ask_ai_alternates(&mut self, cx: &mut Context<Self>) {
+        self.finish_alt_edit();
+        let (para, range) = match self.target_range() {
+            Ok(target) => target,
+            Err(e) => return self.set_notice(e.to_string(), cx),
         };
+        let whole_paragraph = self.selection.is_empty();
+        self.retarget_alt_session_to(para, range.clone(), whole_paragraph, cx);
+        self.request_ai_alternates(para, range, whole_paragraph, cx);
+    }
+
+    fn request_ai_alternates(
+        &mut self,
+        para: usize,
+        range: Range<usize>,
+        whole_paragraph: bool,
+        cx: &mut Context<Self>,
+    ) {
         // Rewrite whole groups: part of an alternate stands for all of it.
         let range = self.doc.paragraphs[para].expand_to_alt_boundaries(range);
-        let (original, export, para_id) = {
+        let (original, export, para_id, group) = {
             let p = &self.doc.paragraphs[para];
-            (p.text()[range.clone()].to_string(), p.export_text(), p.id)
+            let group = if whole_paragraph {
+                p.versions.len() > 1
+            } else {
+                p.alt_starting_at(range.start)
+                    .is_some_and(|seg| p.segment_ranges()[seg] == range)
+            };
+            (
+                p.text()[range.clone()].to_string(),
+                p.export_text(),
+                p.id,
+                group,
+            )
         };
         if original.trim().is_empty() {
             return self.set_notice("Nothing to rewrite here", cx);
@@ -89,6 +124,7 @@ impl Editor {
             range,
             original,
             whole_paragraph,
+            group,
             source,
         };
         let work = cx.background_spawn(async move { provider.complete(&request) });
@@ -121,18 +157,17 @@ impl Editor {
         let Some(para) = self.doc.para_index(job.para_id) else {
             return self.set_notice(STALE_NOTICE, cx);
         };
-        if self.doc.paragraphs[para].text().get(job.range.clone()) != Some(job.original.as_str()) {
+        let Some(range) = self.ai_job_range(para, &job) else {
             return self.set_notice(STALE_NOTICE, cx);
-        }
+        };
         let count = texts.len();
         let for_session = self.alt_session.as_ref().is_some_and(|s| {
             s.para_id == job.para_id
                 && (s.scope == Scope::Paragraph) == job.whole_paragraph
                 && (job.whole_paragraph
-                    || self.doc.paragraphs[para].expand_to_alt_boundaries(s.range.clone())
-                        == job.range)
+                    || self.doc.paragraphs[para].expand_to_alt_boundaries(s.range.clone()) == range)
         });
-        let merged = !job.whole_paragraph && self.merges_inner_groups(para, job.range.clone());
+        let merged = !job.whole_paragraph && self.merges_inner_groups(para, range.clone());
         self.begin_edit(EditKind::Other, para..para + 1);
         let span = if job.whole_paragraph {
             if let Err(e) = self.doc.add_ai_versions(para, texts, job.source) {
@@ -141,10 +176,7 @@ impl Editor {
             self.selection = Selection::caret(DocPos::new(para, 0));
             0..self.doc.paragraphs[para].len()
         } else {
-            match self
-                .doc
-                .add_ai_alternates(para, job.range, texts, job.source)
-            {
+            match self.doc.add_ai_alternates(para, range, texts, job.source) {
                 Ok(span) => {
                     self.selection = Selection::caret(DocPos::new(para, span.end));
                     span
@@ -160,6 +192,24 @@ impl Editor {
             self.set_notice(MERGED_NOTICE, cx);
         }
         self.set_notice(format!("{count} AI alternatives — Alt+↑/↓ to cycle"), cx);
+    }
+
+    /// Where a finished alternates job applies now, or `None` when it is stale. A group job
+    /// applies to the group's current span (or the paragraph) while the group still has the
+    /// original text among its options (or versions); other jobs need the original text still
+    /// at their range.
+    fn ai_job_range(&self, para: usize, job: &AlternatesJob) -> Option<Range<usize>> {
+        let p = &self.doc.paragraphs[para];
+        let has_original =
+            |items: Vec<(String, Source)>| items.iter().any(|(t, _)| *t == job.original);
+        if job.group && job.whole_paragraph {
+            return has_original(p.version_texts()).then(|| 0..p.len());
+        }
+        if job.group {
+            let seg = p.alt_starting_at(job.range.start)?;
+            return has_original(p.options_at(seg)).then(|| p.segment_ranges()[seg].clone());
+        }
+        (p.text().get(job.range.clone()) == Some(job.original.as_str())).then(|| job.range.clone())
     }
 
     pub(super) fn ai_trim_paragraph(
