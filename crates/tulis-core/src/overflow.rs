@@ -59,7 +59,8 @@ impl Document {
     /// Move whole paragraphs to the scratchpad as one block, removing them from the page. The
     /// document always keeps at least one paragraph.
     pub fn stash_paragraphs(&mut self, paras: Range<usize>) -> bool {
-        let paras = paras.start..paras.end.min(self.paragraphs.len());
+        let end = paras.end.min(self.paragraphs.len());
+        let paras = paras.start.min(end)..end;
         let lines: Vec<String> = self.paragraphs[paras.clone()]
             .iter()
             .map(|p| p.export_text())
@@ -216,6 +217,18 @@ mod tests {
         let texts: Vec<String> = d.paragraphs.iter().map(|p| p.text()).collect();
         assert_eq!(texts, vec!["c"]);
         assert_eq!(d.overflow, "a\nb");
+    }
+
+    #[test]
+    fn stash_paragraphs_past_the_end_stashes_nothing() {
+        let mut d = Document::from_texts(&["a", "b"]);
+        assert!(!d.stash_paragraphs(5..7));
+        let (start, end) = (3, 1);
+        assert!(!d.stash_paragraphs(start..end));
+        assert_eq!(d.paragraphs.len(), 2);
+        assert_eq!(d.overflow, "");
+        assert!(d.stash_paragraphs(1..9));
+        assert_eq!(d.overflow, "b");
     }
 
     #[test]
