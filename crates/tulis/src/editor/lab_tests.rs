@@ -263,7 +263,10 @@ fn the_bar_counts_words_before_and_after_the_active_cuts(cx: &mut TestAppContext
         bar.hint.as_deref(),
         Some("Faded words would go. Click one to keep it.")
     );
-    assert_eq!(bar.actions, vec![BarAction::MakeCuts, BarAction::Done]);
+    assert_eq!(
+        bar.actions,
+        vec![BarAction::MakeCuts, BarAction::Walk, BarAction::Done]
+    );
     // A kept cut counts again.
     editor.update(cx, |e, cx| assert!(e.toggle_cut_at(DocPos::new(0, 4), cx)));
     assert_eq!(
@@ -340,4 +343,87 @@ fn done_clears_the_preview_without_changes(cx: &mut TestAppContext) {
     assert!(editor.read_with(cx, |e, _| e.trim_preview.is_none()));
     assert!(!editor.read_with(cx, |e, _| e.dirty));
     assert_eq!(texts(&editor, cx), vec!["I really love tea."]);
+}
+
+fn exports(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Vec<String> {
+    editor.read_with(cx, |e, _| {
+        e.doc.paragraphs.iter().map(|p| p.export_text()).collect()
+    })
+}
+
+fn selected(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> (DocPos, DocPos) {
+    editor.read_with(cx, |e, _| {
+        let r = e.selection.range();
+        (r.start, r.end)
+    })
+}
+
+#[gpui::test]
+fn walking_through_cuts_or_keeps_each_cut_in_turn(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea, truly.", "It is very good."]);
+    preview(&editor, cx, &[(0, 2..9), (0, 17..24), (1, 6..11)]);
+    editor.update(cx, |e, cx| e.bar_action(BarAction::Walk, cx));
+    assert_eq!(bar_title(&editor, cx).as_deref(), Some("Cut 1 of 3"));
+    let bar = editor.read_with(cx, |e, _| e.lab_bar()).unwrap();
+    assert_eq!(
+        bar.hint.as_deref(),
+        Some("y or Enter cuts it · n or Backspace keeps it · Esc stops")
+    );
+    // The current cut is selected (and scrolled to).
+    assert_eq!(
+        selected(&editor, cx),
+        (DocPos::new(0, 2), DocPos::new(0, 9))
+    );
+    // `y` cuts it, without vim and without typing.
+    type_str(&editor, cx, "y");
+    assert_eq!(exports(&editor, cx)[0], "I love tea, truly.");
+    assert_eq!(bar_title(&editor, cx).as_deref(), Some("Cut 2 of 3"));
+    assert_eq!(
+        selected(&editor, cx),
+        (DocPos::new(0, 17), DocPos::new(0, 24))
+    );
+    // Backspace keeps it.
+    editor.update_in(cx, |e, window, cx| e.backspace(&Backspace, window, cx));
+    assert_eq!(bar_title(&editor, cx).as_deref(), Some("Cut 3 of 3"));
+    // Enter cuts the last one, which ends the walk and the preview.
+    editor.update_in(cx, |e, window, cx| e.newline(&Newline, window, cx));
+    assert_eq!(
+        exports(&editor, cx),
+        vec!["I love tea, truly.", "It is good."]
+    );
+    assert!(editor.read_with(cx, |e, _| e.trim_preview.is_none()));
+    assert_eq!(
+        notice(&editor, cx).as_deref(),
+        Some("Walked through 3 cuts: 2 cut, 1 kept")
+    );
+    // Each cut was its own undo step.
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(
+        exports(&editor, cx),
+        vec!["I love tea, truly.", "It is very good."]
+    );
+    // Now `y` is typed again.
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(1, 0)));
+    type_str(&editor, cx, "y");
+    assert_eq!(texts(&editor, cx)[1], "yIt is very good.");
+}
+
+#[gpui::test]
+fn escape_stops_the_walk_and_leaves_the_rest_of_the_preview(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea, truly."]);
+    preview(&editor, cx, &[(0, 2..9), (0, 17..24)]);
+    editor.update(cx, |e, cx| e.bar_action(BarAction::Walk, cx));
+    type_str(&editor, cx, "n");
+    editor.update_in(cx, |e, window, cx| e.cancel(&Cancel, window, cx));
+    let preview = editor.read_with(cx, |e, _| e.trim_preview.clone()).unwrap();
+    assert!(preview.walk.is_none());
+    assert!(!preview.is_active(0) && preview.is_active(1));
+    assert_eq!(
+        bar_title(&editor, cx).as_deref(),
+        Some("Slight trim 5 → 4 words · −20%")
+    );
+    // `y` and `n` are text again.
+    editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(0, 0)));
+    type_str(&editor, cx, "n");
+    assert_eq!(texts(&editor, cx), vec!["nI really love tea, truly."]);
 }

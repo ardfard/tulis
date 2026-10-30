@@ -71,6 +71,18 @@ pub struct TrimPreview {
     pub cuts: Vec<TrimSuggestion>,
     /// Indices into `cuts` the writer chose to keep; the others are active.
     pub kept: HashSet<usize>,
+    /// Walking through the cuts one at a time.
+    pub walk: Option<Walk>,
+}
+
+/// A walk through a trim preview's cuts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Walk {
+    /// The cut being decided (an index into `cuts`).
+    pub at: usize,
+    /// Cuts ghosted and kept so far.
+    pub cut: usize,
+    pub kept: usize,
 }
 
 impl TrimPreview {
@@ -79,7 +91,24 @@ impl TrimPreview {
             level,
             cuts,
             kept: HashSet::new(),
+            walk: None,
         }
+    }
+
+    /// The first active cut at index `from` or later.
+    fn next_active(&self, from: usize) -> Option<usize> {
+        (from..self.cuts.len()).find(|&ix| self.is_active(ix))
+    }
+
+    /// Remove cut `ix` (once it is ghosted); later indices shift down.
+    fn remove(&mut self, ix: usize) {
+        self.cuts.remove(ix);
+        self.kept = self
+            .kept
+            .iter()
+            .filter(|&&k| k != ix)
+            .map(|&k| if k > ix { k - 1 } else { k })
+            .collect();
     }
 
     pub fn is_active(&self, ix: usize) -> bool {
@@ -96,8 +125,11 @@ impl TrimPreview {
             .collect()
     }
 
-    /// Keep only the cuts `keep` accepts; kept cuts stay kept.
+    /// Keep only the cuts `keep` accepts; kept cuts stay kept. Dropping any ends a walk.
     pub(crate) fn retain(&mut self, keep: impl Fn(&TrimSuggestion) -> bool) {
+        if !self.cuts.iter().all(&keep) {
+            self.walk = None;
+        }
         let cuts = std::mem::take(&mut self.cuts);
         let kept = std::mem::take(&mut self.kept);
         for (ix, cut) in cuts.into_iter().enumerate() {
@@ -115,6 +147,7 @@ impl TrimPreview {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarAction {
     MakeCuts,
+    Walk,
     Done,
 }
 
@@ -122,6 +155,7 @@ impl BarAction {
     pub fn label(self) -> &'static str {
         match self {
             BarAction::MakeCuts => "Make the cuts",
+            BarAction::Walk => "Walk through",
             BarAction::Done => "Done",
         }
     }
@@ -130,6 +164,7 @@ impl BarAction {
     pub fn id(self) -> &'static str {
         match self {
             BarAction::MakeCuts => "make-cuts",
+            BarAction::Walk => "walk",
             BarAction::Done => "done",
         }
     }
@@ -368,6 +403,17 @@ impl Editor {
     /// The bar's text and buttons, if the Lab has something showing.
     pub fn lab_bar(&self) -> Option<LabBar> {
         let preview = self.trim_preview.as_ref()?;
+        if let Some(walk) = preview.walk {
+            let decided = walk.cut + walk.kept;
+            let left = (walk.at..preview.cuts.len())
+                .filter(|&ix| preview.is_active(ix))
+                .count();
+            return Some(LabBar {
+                title: format!("Cut {} of {}", decided + 1, decided + left),
+                hint: Some("y or Enter cuts it · n or Backspace keeps it · Esc stops".into()),
+                actions: vec![BarAction::Done],
+            });
+        }
         let before = stats::document_counts(&self.doc).words;
         let after = stats::words_without(&self.doc, &self.lab_items());
         let pct = if before == 0 {
@@ -381,7 +427,7 @@ impl Editor {
                 preview.level.label()
             ),
             hint: Some("Faded words would go. Click one to keep it.".into()),
-            actions: vec![BarAction::MakeCuts, BarAction::Done],
+            actions: vec![BarAction::MakeCuts, BarAction::Walk, BarAction::Done],
         })
     }
 
@@ -389,6 +435,7 @@ impl Editor {
     pub fn bar_action(&mut self, action: BarAction, cx: &mut Context<Self>) {
         match action {
             BarAction::MakeCuts => self.make_cuts(cx),
+            BarAction::Walk => self.start_walk(cx),
             BarAction::Done => {
                 self.stop_ai();
                 self.trim_preview = None;
@@ -420,6 +467,113 @@ impl Editor {
             format!("Cut {made} {passages} (ghosted — Ctrl+Z to undo)"),
             cx,
         );
+    }
+
+    /// Walking through the trim preview's cuts (`y`/`n`, Enter/Backspace and Esc are captured).
+    pub fn walking(&self) -> bool {
+        self.trim_preview.as_ref().is_some_and(|t| t.walk.is_some())
+    }
+
+    /// Walk through: select the first active cut and capture the walk keys.
+    fn start_walk(&mut self, cx: &mut Context<Self>) {
+        let Some(preview) = &mut self.trim_preview else {
+            return;
+        };
+        let Some(at) = preview.next_active(0) else {
+            return self.set_notice("No cuts to walk through", cx);
+        };
+        preview.walk = Some(Walk {
+            at,
+            cut: 0,
+            kept: 0,
+        });
+        self.select_walk_cut(cx);
+    }
+
+    /// Select the walk's current cut (scrolling to it).
+    fn select_walk_cut(&mut self, cx: &mut Context<Self>) {
+        let Some(preview) = &self.trim_preview else {
+            return;
+        };
+        let Some(walk) = preview.walk else { return };
+        let cut = &preview.cuts[walk.at];
+        let Some(para) = self.doc.para_index(cut.para_id) else {
+            return;
+        };
+        let range = cut.range.clone();
+        self.set_selection(
+            Selection {
+                anchor: DocPos::new(para, range.start),
+                head: DocPos::new(para, range.end),
+            },
+            cx,
+        );
+    }
+
+    /// `y`/Enter (`cut`) ghosts the walk's current cut, as its own undo step; `n`/Backspace
+    /// keeps it. Either moves on; after the last cut the walk and the preview end.
+    pub(crate) fn walk_step(&mut self, cut: bool, cx: &mut Context<Self>) {
+        let Some(walk) = self.trim_preview.as_ref().and_then(|t| t.walk) else {
+            return;
+        };
+        let target = self.trim_preview.as_ref().and_then(|t| {
+            let c = &t.cuts[walk.at];
+            Some((self.doc.para_index(c.para_id)?, c.range.clone()))
+        });
+        let mut next = walk;
+        if cut {
+            if let Some((para, range)) = target {
+                self.record_step(EditKind::Other);
+                if self.doc.set_ghost(para, range, true).is_ok() {
+                    self.dirty = true;
+                }
+            }
+            next.cut += 1;
+        } else {
+            next.kept += 1;
+        }
+        let Some(preview) = &mut self.trim_preview else {
+            return;
+        };
+        let from = if cut {
+            preview.remove(walk.at);
+            walk.at
+        } else {
+            preview.kept.insert(walk.at);
+            walk.at + 1
+        };
+        match preview.next_active(from) {
+            Some(at) => {
+                preview.walk = Some(Walk { at, ..next });
+                self.select_walk_cut(cx);
+            }
+            None => {
+                self.trim_preview = None;
+                let head = self.selection.head;
+                self.set_selection(Selection::caret(head), cx);
+                let total = next.cut + next.kept;
+                self.set_notice(
+                    format!(
+                        "Walked through {total} cuts: {} cut, {} kept",
+                        next.cut, next.kept
+                    ),
+                    cx,
+                );
+            }
+        }
+    }
+
+    /// Esc during a walk: stop it, leaving the preview. Returns false when not walking.
+    pub(crate) fn end_walk(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(preview) = &mut self.trim_preview else {
+            return false;
+        };
+        if preview.walk.take().is_none() {
+            return false;
+        }
+        let head = self.selection.head;
+        self.set_selection(Selection::caret(head), cx);
+        true
     }
 
     /// A click (or Enter) at `pos`: keep the active cut there, or make a kept one active

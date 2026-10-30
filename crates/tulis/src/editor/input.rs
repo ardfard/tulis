@@ -78,6 +78,10 @@ impl EntityInputHandler for Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A walk through a trim preview captures plain `y` and `n`.
+        if self.walking() && (text == "y" || text == "n") {
+            return self.walk_step(text == "y", cx);
+        }
         if self.vim_captures_text() {
             for ch in text.chars() {
                 self.vim_key(tulis_core::vim::VimKey::Char(ch), window, cx);

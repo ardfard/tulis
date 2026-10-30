@@ -298,12 +298,15 @@ impl Editor {
         self.use_overflow(range, self.selection.head, copy, cx)
     }
 
-    /// Esc: cancel AI, else close the trim preview, else stop editing an alternate (and leave
+    /// Esc: cancel AI, else end a walk through cuts, else close the trim preview, else stop editing an alternate (and leave
     /// vim's Insert or Visual mode, or drop its pending keys). With none of that to do, close an
     /// open sidebar.
     pub(super) fn cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
         if self.stop_ai() {
             return self.set_notice("AI request cancelled", cx);
+        }
+        if self.end_walk(cx) {
+            return;
         }
         if self.trim_preview.take().is_some() {
             return self.set_notice("Trim preview closed", cx);

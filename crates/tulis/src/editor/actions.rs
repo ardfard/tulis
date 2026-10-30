@@ -180,6 +180,9 @@ impl Editor {
     }
 
     pub(super) fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) {
+        if self.walking() {
+            return self.walk_step(true, cx);
+        }
         // Enter in a trim preview's cut keeps it (or makes a kept one active again).
         if self.selection.is_empty() && self.toggle_cut_at(self.selection.head, cx) {
             return;
@@ -191,6 +194,9 @@ impl Editor {
     }
 
     pub(super) fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        if self.walking() {
+            return self.walk_step(false, cx);
+        }
         if self.vim_captures_text() {
             return self.horizontal(false, false, cx);
         }
