@@ -285,6 +285,63 @@ fn scratchpad_edits_mark_the_document_dirty_but_page_undo_keeps_them(cx: &mut Te
 }
 
 #[gpui::test]
+fn using_a_block_moves_it_to_the_cursor_as_one_undo_step(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["First.", ""]);
+    editor.update(cx, |e, _| {
+        e.doc.overflow = "Alpha.\n\nBeta gamma.".into();
+        e.selection = Selection::caret(DocPos::new(1, 0));
+    });
+    let overflow = |cx: &mut VisualTestContext| editor.read_with(cx, |e, _| e.doc.overflow.clone());
+    // Ctrl+Enter with the field's cursor inside "Beta gamma.": that block moves.
+    assert!(editor.update(cx, |e, cx| e.use_overflow_selection(10..10, false, cx)));
+    assert_eq!(texts(&editor, cx), vec!["First.", "Beta gamma."]);
+    assert_eq!(overflow(cx), "Alpha.");
+    assert_eq!(editor.read_with(cx, |e, _| e.cursor()), DocPos::new(1, 11));
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["First.", ""]);
+    assert_eq!(overflow(cx), "Alpha.\n\nBeta gamma.");
+    editor.update_in(cx, |e, window, cx| e.redo(&Redo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["First.", "Beta gamma."]);
+    assert_eq!(overflow(cx), "Alpha.");
+}
+
+#[gpui::test]
+fn copying_a_selection_keeps_it_in_overflow(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Say "]);
+    editor.update(cx, |e, _| {
+        e.doc.overflow = "Alpha.\n\nBeta gamma.".into();
+        e.selection = Selection::caret(DocPos::new(0, 4));
+    });
+    // Ctrl+Shift+Enter with "gamma" selected in the field.
+    assert!(editor.update(cx, |e, cx| e.use_overflow_selection(13..18, true, cx)));
+    assert_eq!(texts(&editor, cx), vec!["Say gamma"]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.doc.overflow.clone()),
+        "Alpha.\n\nBeta gamma."
+    );
+    // A one-letter block is its own undo step, not part of the typing before it.
+    type_str(&editor, cx, "!");
+    editor.update(cx, |e, _| e.doc.overflow = "x".into());
+    assert!(editor.update(cx, |e, cx| e.use_overflow_selection(0..0, true, cx)));
+    assert_eq!(texts(&editor, cx), vec!["Say gamma!x"]);
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["Say gamma!"]);
+}
+
+#[gpui::test]
+fn using_overflow_on_a_blank_line_does_nothing(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Page."]);
+    editor.update(cx, |e, _| e.doc.overflow = "A\n\n\nB".into());
+    assert!(!editor.update(cx, |e, cx| e.use_overflow_selection(2..2, false, cx)));
+    assert!(!editor.update(cx, |e, cx| e.use_overflow_selection(1..3, false, cx)));
+    assert_eq!(texts(&editor, cx), vec!["Page."]);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.last_notice().map(str::to_string)),
+        Some("Nothing to use here".into())
+    );
+}
+
+#[gpui::test]
 fn accepting_a_trim_ghosts_it_and_escape_dismisses(cx: &mut TestAppContext) {
     let (editor, cx) = editor_with(cx, &["I really love tea, really."]);
     editor.update(cx, |e, _| {

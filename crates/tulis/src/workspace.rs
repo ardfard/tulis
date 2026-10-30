@@ -876,6 +876,39 @@ mod tests {
         assert!(page_focused(&ws, cx));
     }
 
+    #[gpui::test]
+    fn ctrl_enter_in_the_scratchpad_moves_the_block_and_ctrl_shift_enter_copies(
+        cx: &mut TestAppContext,
+    ) {
+        let (ws, cx) = root_workspace(cx, &["Page."]);
+        ws.update(cx, |ws, cx| {
+            ws.editor.update(cx, |e, _| e.doc.overflow = "Idea.".into())
+        });
+        cx.simulate_keystrokes("secondary-\\");
+        cx.run_until_parked();
+        focus_scratchpad(&ws, cx);
+        let page_text = |cx: &mut gpui::VisualTestContext| {
+            ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.paragraphs[0].text())
+        };
+        cx.simulate_keystrokes("secondary-enter");
+        cx.run_until_parked();
+        assert_eq!(page_text(cx), "Idea.Page.");
+        assert_eq!(scratchpad_value(&ws, cx), "");
+        assert!(page_focused(&ws, cx));
+        // Page undo puts the block back in the scratchpad.
+        cx.simulate_keystrokes("secondary-z");
+        cx.run_until_parked();
+        assert_eq!(page_text(cx), "Page.");
+        assert_eq!(scratchpad_value(&ws, cx), "Idea.");
+        // Copy: the text stays, and so does the focus.
+        focus_scratchpad(&ws, cx);
+        cx.simulate_keystrokes("secondary-shift-enter");
+        cx.run_until_parked();
+        assert_eq!(page_text(cx), "Idea.Page.");
+        assert_eq!(scratchpad_value(&ws, cx), "Idea.");
+        assert!(!page_focused(&ws, cx));
+    }
+
     fn sidebar_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {
         let sidebar = ws.read_with(cx, |ws, _| ws.alt_sidebar.clone());
         sidebar.is_some_and(|s| cx.update(|window, cx| s.read(cx).list_focus.is_focused(window)))

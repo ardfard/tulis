@@ -7,6 +7,7 @@ use gpui::{
 };
 use gpui_component::input::{InputEvent, Textarea, TextareaState};
 
+use crate::actions::{OverflowCopy, OverflowUse};
 use crate::editor::Editor;
 use crate::workspace::Workspace;
 
@@ -60,6 +61,26 @@ impl Scratchpad {
         cx.notify();
     }
 
+    /// Ctrl+Enter: move the field's selection, or the block at its cursor, to the page cursor,
+    /// and focus the page.
+    fn use_block(&mut self, _: &OverflowUse, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self.input.read(cx).selected_range();
+        let used = self
+            .editor
+            .update(cx, |e, cx| e.use_overflow_selection(selected, false, cx));
+        if used {
+            let page = self.editor.focus_handle(cx);
+            window.focus(&page, cx);
+        }
+    }
+
+    /// Ctrl+Shift+Enter: the same, but the text stays here and so does the focus.
+    fn copy_block(&mut self, _: &OverflowCopy, _: &mut Window, cx: &mut Context<Self>) {
+        let selected = self.input.read(cx).selected_range();
+        self.editor
+            .update(cx, |e, cx| e.use_overflow_selection(selected, true, cx));
+    }
+
     pub(crate) fn has_focus(&self, window: &Window, cx: &App) -> bool {
         self.input.focus_handle(cx).is_focused(window)
     }
@@ -71,6 +92,8 @@ impl Render for Scratchpad {
         div()
             .id("scratchpad")
             .key_context("Scratchpad")
+            .on_action(cx.listener(Self::use_block))
+            .on_action(cx.listener(Self::copy_block))
             .w(px(SCRATCHPAD_WIDTH))
             .flex_none()
             .h_full()

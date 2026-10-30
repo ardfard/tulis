@@ -13,6 +13,7 @@ use crate::actions::*;
 
 const STASHED: &str = "Stashed to Overflow";
 const NOTHING_TO_STASH: &str = "Nothing to move to overflow";
+const NOTHING_TO_USE: &str = "Nothing to use here";
 
 impl Editor {
     /// The selection within one paragraph, or the cursor's whole paragraph when nothing is selected.
@@ -216,6 +217,55 @@ impl Editor {
             .for_each_state(|(doc, _)| doc.overflow = text.to_string());
         self.dirty = true;
         cx.notify();
+    }
+
+    /// Put the scratchpad text at byte `range` into the page at `at`, trimmed, as one undo
+    /// step (Ctrl+Enter, a drop). It leaves the scratchpad unless `copy`. Returns false when the
+    /// range holds only whitespace.
+    pub fn use_overflow(
+        &mut self,
+        range: Range<usize>,
+        at: DocPos,
+        copy: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let text = self.doc.overflow.get(range.clone()).unwrap_or("").trim();
+        if text.is_empty() {
+            self.set_notice(NOTHING_TO_USE, cx);
+            return false;
+        }
+        let text = text.to_string();
+        let at = self.finish_alt_edit().apply(at);
+        self.selection = Selection::caret(self.doc.clamp(at));
+        // Its own undo step, even for one letter typed into the page right before or after.
+        self.history.break_coalescing();
+        self.insert_text(&text, cx);
+        self.history.break_coalescing();
+        if !copy {
+            self.doc.take_overflow(range);
+        }
+        cx.notify();
+        true
+    }
+
+    /// Ctrl+Enter in the scratchpad: its selection (a byte range of `doc.overflow`) or, with
+    /// none, the block at its cursor goes to the page cursor.
+    pub fn use_overflow_selection(
+        &mut self,
+        selected: Range<usize>,
+        copy: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let range = if selected.is_empty() {
+            self.doc.overflow_block_at(selected.start)
+        } else {
+            Some(selected)
+        };
+        let Some(range) = range else {
+            self.set_notice(NOTHING_TO_USE, cx);
+            return false;
+        };
+        self.use_overflow(range, self.selection.head, copy, cx)
     }
 
     /// Accept the trim suggestion under the cursor (or the next one, or the first) by ghosting it.

@@ -47,6 +47,8 @@ gpui::actions!(
         ToggleGhost,
         SendToOverflow,
         ToggleOverflowPanel,
+        OverflowUse,
+        OverflowCopy,
         AiAlternates,
         AiTrimParagraph,
         AiTrimDocument,

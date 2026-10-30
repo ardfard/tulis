@@ -452,6 +452,25 @@ pub static COMMANDS: &[Command] = &[
         Some("gx"),
         ToggleOverflowPanel
     ),
+    // In the scratchpad's text field, ahead of the field's own Ctrl+Enter (a line break).
+    cmd!(
+        "overflow_use",
+        "Move the block (or selection) to the page",
+        Overflow,
+        ["secondary-enter"],
+        Some("Scratchpad > Input"),
+        None,
+        OverflowUse
+    ),
+    cmd!(
+        "overflow_copy",
+        "Copy the block (or selection) to the page",
+        Overflow,
+        ["secondary-shift-enter"],
+        Some("Scratchpad > Input"),
+        None,
+        OverflowCopy
+    ),
     // Lab
     cmd!(
         "open_lab",
