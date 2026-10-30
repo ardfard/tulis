@@ -955,3 +955,42 @@ fn where_marks_touch_the_note_is_the_later_marks(cx: &mut TestAppContext) {
     assert_eq!(hint_at(cx, 7).as_deref(), Some("second"));
     assert_eq!(hint_at(cx, 10), None);
 }
+
+#[gpui::test]
+fn escape_leaves_vim_insert_and_alt_editing_before_clearing_the_lab(cx: &mut TestAppContext) {
+    use tulis_core::vim::Mode;
+    let (editor, cx) = editor_with(cx, &["I think it is fine."]);
+    editor.update(cx, |e, _| {
+        e.vim = Some(Vim::new());
+        e.config.editor.long_sentence_words = 3;
+    });
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Long, &all, cx));
+    type_str(&editor, cx, "i");
+    let mode =
+        |cx: &mut VisualTestContext| editor.read_with(cx, |e, _| e.vim.as_ref().unwrap().mode());
+    assert_eq!(mode(cx), Mode::Insert);
+    let escape = |cx: &mut VisualTestContext| {
+        editor.update_in(cx, |e, window, cx| e.cancel(&Cancel, window, cx))
+    };
+    escape(cx);
+    assert_eq!(mode(cx), Mode::Normal);
+    assert_eq!(marks(&editor, cx).len(), 1);
+    escape(cx);
+    assert!(marks(&editor, cx).is_empty());
+    // Editing an alternate ends before a trim preview closes.
+    editor.update(cx, |e, _| {
+        e.vim = None;
+        e.doc.make_alt(0, 2..7).unwrap();
+        e.alt_edit = Some(super::AltEdit {
+            para_id: e.doc.paragraphs[0].id,
+            start: 2,
+        });
+    });
+    preview(&editor, cx, &[(0, 8..11)]);
+    escape(cx);
+    assert!(editor.read_with(cx, |e, _| e.alt_edit.is_none()));
+    assert!(editor.read_with(cx, |e, _| e.trim_preview.is_some()));
+    escape(cx);
+    assert!(editor.read_with(cx, |e, _| e.trim_preview.is_none()));
+}

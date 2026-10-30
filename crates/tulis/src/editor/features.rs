@@ -298,16 +298,27 @@ impl Editor {
         self.use_overflow(range, self.selection.head, copy, cx)
     }
 
-    /// Esc: cancel AI, else end a walk through cuts, else close the trim preview (or clear the
-    /// marks), else stop editing an alternate (and leave
-    /// vim's Insert or Visual mode, or drop its pending keys). With none of that to do, close an
-    /// open sidebar.
+    /// Esc, one step per press: cancel AI; else end a walk through cuts; else stop editing an
+    /// alternate and leave vim's Insert or Visual mode (or drop its pending keys); else close
+    /// the trim preview, or clear the marks, or hide the fixes bar; else close an open sidebar.
     pub(super) fn cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
         if self.stop_ai_for_other_work(cx).is_some() {
             return self.set_notice("AI request cancelled", cx);
         }
         if self.end_walk(cx) {
             return;
+        }
+        let editing = self.alt_edit.is_some()
+            || self
+                .vim
+                .as_ref()
+                .is_some_and(|v| v.mode() != tulis_core::vim::Mode::Normal || v.is_pending());
+        if editing {
+            self.finish_alt_edit();
+            if self.vim.is_some() {
+                self.vim_key(tulis_core::vim::VimKey::Escape, window, cx);
+            }
+            return cx.notify();
         }
         if self.trim_preview.take().is_some() {
             return self.set_notice("Trim preview closed", cx);
@@ -319,18 +330,7 @@ impl Editor {
         if self.lab_fixes.take().is_some() {
             return cx.notify();
         }
-        let idle = self.alt_edit.is_none()
-            && self
-                .vim
-                .as_ref()
-                .is_none_or(|v| v.mode() == tulis_core::vim::Mode::Normal && !v.is_pending());
-        self.finish_alt_edit();
-        if self.vim.is_some() {
-            self.vim_key(tulis_core::vim::VimKey::Escape, window, cx);
-        }
-        if idle {
-            self.close_alternates(cx);
-        }
+        self.close_alternates(cx);
         cx.notify();
     }
 }
