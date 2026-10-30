@@ -6,9 +6,12 @@ use gpui::{
     Styled, Subscription, Window, div, prelude::*, px,
 };
 use gpui_component::Sizable;
+use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::tab::{Tab, TabBar};
 
-use crate::actions::{AltKeep, AltNext, AltPrev, AltRemove, CloseAlternates};
+use crate::actions::{
+    AiAlternates, AltFocusInput, AltKeep, AltNext, AltPrev, AltRemove, CloseAlternates,
+};
 use crate::editor::{Editor, Scope};
 use crate::workspace::Workspace;
 
@@ -18,17 +21,54 @@ pub struct AltSidebar {
     editor: Entity<Editor>,
     /// Focus of the option list (its keys: arrows, j/k, Enter, Delete, dd, i/o).
     pub(crate) list_focus: FocusHandle,
+    /// The type-to-add row.
+    pub(crate) input: Entity<InputState>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl AltSidebar {
-    pub fn new(editor: Entity<Editor>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let subscriptions = vec![cx.observe(&editor, |_, _, cx| cx.notify())];
+    pub fn new(editor: Entity<Editor>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("type another way to say it…"));
+        let subscriptions = vec![
+            cx.observe(&editor, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { .. } = event {
+                    this.add_typed(window, cx);
+                }
+            }),
+        ];
         Self {
             editor,
             list_focus: cx.focus_handle(),
+            input,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Enter in the text field: add its text as an option (or version), show it, clear the
+    /// field and go back to the list.
+    fn add_typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.input.read(cx).value().to_string();
+        if text.trim().is_empty() {
+            return;
+        }
+        self.editor
+            .update(cx, |e, cx| e.add_alternate_text(&text, cx));
+        self.input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        window.focus(&self.list_focus, cx);
+    }
+
+    /// `i` / `o`: focus the text field.
+    fn focus_input(&mut self, _: &AltFocusInput, window: &mut Window, cx: &mut Context<Self>) {
+        let input = self.input.focus_handle(cx);
+        window.focus(&input, cx);
+    }
+
+    /// Ctrl+Shift+G or the "✦ Ask AI" row: AI alternatives for this target.
+    fn ask_ai(&mut self, _: &AiAlternates, _: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, cx| e.ask_ai_alternates(cx));
     }
 
     /// Esc: close the sidebar, keeping the shown option (the workspace refocuses the page).
@@ -109,6 +149,7 @@ impl Render for AltSidebar {
             .id("alt-sidebar")
             .key_context("AltSidebar")
             .on_action(cx.listener(Self::close))
+            .on_action(cx.listener(Self::ask_ai))
             .w(px(SIDEBAR_WIDTH))
             .flex_none()
             .h_full()
@@ -128,6 +169,7 @@ impl Render for AltSidebar {
                     .on_action(cx.listener(Self::prev))
                     .on_action(cx.listener(Self::keep))
                     .on_action(cx.listener(Self::remove))
+                    .on_action(cx.listener(Self::focus_input))
                     .flex_1()
                     .overflow_y_scroll()
                     .p_2()
@@ -160,6 +202,22 @@ impl Render for AltSidebar {
                             .when(row.ai, |d| {
                                 d.child(div().flex_none().text_color(t.ai_accent).child("✦"))
                             })
+                    })),
+            )
+            .child(div().px_2().child(Input::new(&self.input).small()))
+            .child(
+                div()
+                    .id("alt-ask-ai")
+                    .m_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .text_color(t.ai_accent)
+                    .hover(|d| d.bg(t.selection))
+                    .child("✦ Ask AI")
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.ask_ai(&AiAlternates, window, cx)
                     })),
             )
             .into_any_element()

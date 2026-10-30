@@ -333,6 +333,24 @@ pub static COMMANDS: &[Command] = &[
         AltRemove
     ),
     cmd!(
+        "alt_focus_input",
+        "Sidebar: type a new option",
+        Hidden,
+        ["i", "o"],
+        Some("AltList"),
+        None,
+        AltFocusInput
+    ),
+    cmd!(
+        "alt_ask_ai",
+        "Sidebar: AI alternatives",
+        Hidden,
+        ["secondary-shift-g", "secondary-j"],
+        Some("AltSidebar"),
+        None,
+        AiAlternates
+    ),
+    cmd!(
         "cycle_next",
         "Next alternate",
         Alternates,

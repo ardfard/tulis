@@ -367,3 +367,67 @@ impl Editor {
         self.end_edit(cx);
     }
 }
+
+/// Shown when a Sentence or Selection group swallows the groups inside it.
+pub(crate) const MERGED_NOTICE: &str = "Inner alternates merged — Ctrl+Z to restore";
+
+impl Editor {
+    /// After an add (typed or AI) changed the target to `range`: follow it and highlight the
+    /// new shown row. The next preview records a fresh undo step.
+    pub(crate) fn alt_session_added(&mut self, para: usize, range: Range<usize>) {
+        self.update_alt_target(para, range);
+        if let Some(session) = self.alt_session.as_mut() {
+            session.previewed = false;
+        }
+        self.highlight_shown_row();
+    }
+
+    /// Whether making a group over `range` (grown around alternates, as `make_alt` does) would
+    /// merge alternates strictly inside it.
+    pub(crate) fn merges_inner_groups(&self, para: usize, range: Range<usize>) -> bool {
+        let p = &self.doc.paragraphs[para];
+        let range = p.expand_to_alt_boundaries(range);
+        p.segments().iter().zip(p.segment_ranges()).any(|(seg, r)| {
+            seg.is_alt() && r != range && range.start <= r.start && r.end <= range.end
+        })
+    }
+
+    /// Add `text` as a new option of the target (creating its group on the first add), or as a
+    /// new version on the Paragraph tab, and show it.
+    pub fn add_alternate_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        let Some((para, _)) = self.alt_session_target() else {
+            return;
+        };
+        let Some((scope, range)) = self
+            .alt_session
+            .as_ref()
+            .map(|s| (s.scope, s.range.clone()))
+        else {
+            return;
+        };
+        if scope != Scope::Paragraph && range.is_empty() {
+            return self.set_notice("Nothing to rewrite here", cx);
+        }
+        let merged = scope != Scope::Paragraph && self.merges_inner_groups(para, range.clone());
+        self.begin_edit(EditKind::Other, para..para + 1);
+        let range = if scope == Scope::Paragraph {
+            self.doc.add_version(para, text.to_string());
+            0..self.doc.paragraphs[para].len()
+        } else {
+            match self.doc.add_option(para, range, text.to_string()) {
+                Ok(span) => span,
+                Err(e) => return self.set_notice(e.to_string(), cx),
+            }
+        };
+        self.alt_session_added(para, range.clone());
+        self.selection = Selection::caret(DocPos::new(para, range.end));
+        self.end_edit(cx);
+        if merged {
+            self.set_notice(MERGED_NOTICE, cx);
+        }
+    }
+}

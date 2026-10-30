@@ -8,7 +8,8 @@ use tulis_core::ai::{AiError, CompletionRequest, LlmProvider, prompts, provider_
 use tulis_core::history::EditKind;
 use tulis_core::{AiKind, DocPos, ParaId, Selection, Source};
 
-use super::{Editor, TrimSuggestion};
+use super::alt_session::MERGED_NOTICE;
+use super::{Editor, Scope, TrimSuggestion};
 use crate::actions::{AiAlternates, AiTrimDocument, AiTrimParagraph};
 
 pub(crate) const STALE_NOTICE: &str = "Text changed while AI was working; result dropped";
@@ -42,14 +43,30 @@ impl Editor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.ask_ai_alternates(cx);
+    }
+
+    /// AI alternatives for the sidebar's target while it is open, else for the selection (or the
+    /// cursor's paragraph, as versions).
+    pub fn ask_ai_alternates(&mut self, cx: &mut Context<Self>) {
         self.finish_alt_edit();
-        let (para, range) = match self.target_range() {
-            Ok(target) => target,
-            Err(e) => return self.set_notice(e.to_string(), cx),
+        let session = self.alt_session_target().zip(
+            self.alt_session
+                .as_ref()
+                .map(|s| (s.scope, s.range.clone())),
+        );
+        let (para, range, whole_paragraph) = match session {
+            Some(((para, _), (Scope::Paragraph, _))) => {
+                (para, 0..self.doc.paragraphs[para].len(), true)
+            }
+            Some(((para, _), (_, range))) => (para, range, false),
+            None => match self.target_range() {
+                Ok((para, range)) => (para, range, self.selection.is_empty()),
+                Err(e) => return self.set_notice(e.to_string(), cx),
+            },
         };
         // Rewrite whole groups: part of an alternate stands for all of it.
         let range = self.doc.paragraphs[para].expand_to_alt_boundaries(range);
-        let whole_paragraph = self.selection.is_empty();
         let (original, export, para_id) = {
             let p = &self.doc.paragraphs[para];
             (p.text()[range.clone()].to_string(), p.export_text(), p.id)
@@ -108,22 +125,40 @@ impl Editor {
             return self.set_notice(STALE_NOTICE, cx);
         }
         let count = texts.len();
+        let for_session = self.alt_session.as_ref().is_some_and(|s| {
+            s.para_id == job.para_id
+                && (s.scope == Scope::Paragraph) == job.whole_paragraph
+                && (job.whole_paragraph
+                    || self.doc.paragraphs[para].expand_to_alt_boundaries(s.range.clone())
+                        == job.range)
+        });
+        let merged = !job.whole_paragraph && self.merges_inner_groups(para, job.range.clone());
         self.begin_edit(EditKind::Other, para..para + 1);
-        if job.whole_paragraph {
+        let span = if job.whole_paragraph {
             if let Err(e) = self.doc.add_ai_versions(para, texts, job.source) {
                 return self.set_notice(e.to_string(), cx);
             }
             self.selection = Selection::caret(DocPos::new(para, 0));
+            0..self.doc.paragraphs[para].len()
         } else {
             match self
                 .doc
                 .add_ai_alternates(para, job.range, texts, job.source)
             {
-                Ok(span) => self.selection = Selection::caret(DocPos::new(para, span.end)),
+                Ok(span) => {
+                    self.selection = Selection::caret(DocPos::new(para, span.end));
+                    span
+                }
                 Err(e) => return self.set_notice(e.to_string(), cx),
             }
+        };
+        if for_session {
+            self.alt_session_added(para, span);
         }
         self.end_edit(cx);
+        if merged {
+            self.set_notice(MERGED_NOTICE, cx);
+        }
         self.set_notice(format!("{count} AI alternatives — Alt+↑/↓ to cycle"), cx);
     }
 

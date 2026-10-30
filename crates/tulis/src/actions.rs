@@ -39,6 +39,7 @@ gpui::actions!(
         AltPrev,
         AltKeep,
         AltRemove,
+        AltFocusInput,
         CycleNext,
         CyclePrev,
         AcceptAlternate,

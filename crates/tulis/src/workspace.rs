@@ -920,6 +920,41 @@ mod tests {
     }
 
     #[gpui::test]
+    fn typing_in_the_sidebar_field_adds_an_option(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["I love tea"]);
+        ws.update(cx, |ws, cx| {
+            ws.editor.update(cx, |e, cx| {
+                e.selection = Selection::caret(DocPos::new(0, 3));
+                e.open_alternates(None, cx);
+            })
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("i");
+        assert!(!sidebar_focused(&ws, cx));
+        cx.simulate_input("adore");
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        let text = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.paragraphs[0].text());
+        assert_eq!(text, "I adore tea");
+        assert!(sidebar_focused(&ws, cx));
+        let field = ws.read_with(cx, |ws, cx| {
+            ws.alt_sidebar
+                .as_ref()
+                .unwrap()
+                .read(cx)
+                .input
+                .read(cx)
+                .value()
+        });
+        assert_eq!(field.as_ref(), "");
+        // Esc in the field closes the sidebar too.
+        cx.simulate_keystrokes("o");
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(ws.read_with(cx, |ws, cx| ws.editor.read(cx).alt_session.is_none()));
+    }
+
+    #[gpui::test]
     fn toasts_stack_two_and_expire(cx: &mut TestAppContext) {
         init(cx);
         let (ws, cx) = cx.add_window_view(|window, cx| {

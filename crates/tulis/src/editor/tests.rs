@@ -973,3 +973,91 @@ fn paragraph_tab_previews_and_removes_versions(cx: &mut TestAppContext) {
     editor.update(cx, |e, cx| e.remove_alternate(1, cx));
     assert_eq!(rows(&editor, cx), vec![row("Draft one.", true)]);
 }
+
+#[gpui::test]
+fn the_first_add_creates_the_group_and_shows_the_new_option(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea"]);
+    select(&editor, cx, DocPos::new(0, 3), DocPos::new(0, 3));
+    editor.update(cx, |e, cx| e.open_alternates(None, cx));
+    editor.update(cx, |e, cx| e.add_alternate_text("  adore ", cx));
+    assert_eq!(texts(&editor, cx), vec!["I adore tea"]);
+    assert_eq!(
+        rows(&editor, cx),
+        vec![row("love", false), row("adore", true)]
+    );
+    editor.update(cx, |e, cx| e.add_alternate_text("like", cx));
+    assert_eq!(rows(&editor, cx).len(), 3);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.alt_session.as_ref().unwrap().highlight),
+        2
+    );
+    editor.update(cx, |e, cx| e.add_alternate_text("   ", cx)); // blank: ignored
+    assert_eq!(rows(&editor, cx).len(), 3);
+    editor.update_in(cx, |e, window, cx| {
+        e.undo(&Undo, window, cx);
+        e.undo(&Undo, window, cx);
+    });
+    assert_eq!(texts(&editor, cx), vec!["I love tea"]);
+    assert!(editor.read_with(cx, |e, _| !e.doc.paragraphs[0].has_metadata()));
+}
+
+#[gpui::test]
+fn adding_on_the_paragraph_tab_adds_a_version(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Draft one."]);
+    editor.update(cx, |e, cx| {
+        e.open_alternates(Some(Scope::Paragraph), cx);
+        e.add_alternate_text("Draft two.", cx);
+    });
+    assert_eq!(texts(&editor, cx), vec!["Draft two."]);
+    assert_eq!(
+        rows(&editor, cx),
+        vec![row("Draft one.", false), row("Draft two.", true)]
+    );
+}
+
+#[gpui::test]
+fn a_sentence_option_merges_inner_groups_with_a_toast_and_undo_restores_them(
+    cx: &mut TestAppContext,
+) {
+    let (editor, cx) = editor_with(cx, &["I love tea. Bye."]);
+    editor.update(cx, |e, _| {
+        e.doc.add_option(0, 2..6, "adore".into()).unwrap();
+        e.selection = Selection::caret(DocPos::new(0, 0));
+    });
+    editor.update(cx, |e, cx| {
+        e.open_alternates(Some(Scope::Sentence), cx);
+        e.add_alternate_text("Tea is love.", cx);
+    });
+    assert_eq!(texts(&editor, cx), vec!["Tea is love. Bye."]);
+    assert_eq!(
+        rows(&editor, cx),
+        vec![row("I adore tea.", false), row("Tea is love.", true)]
+    );
+    assert_eq!(
+        editor
+            .read_with(cx, |e, _| e.last_notice().map(str::to_string))
+            .as_deref(),
+        Some(super::alt_session::MERGED_NOTICE)
+    );
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["I adore tea. Bye."]);
+    let inner = editor.read_with(cx, |e, _| e.doc.alt_info(DocPos::new(0, 3)).unwrap());
+    assert_eq!((inner.span, inner.count), (2..7, 2));
+}
+
+#[gpui::test]
+fn asking_ai_from_the_sidebar_appends_ai_options_to_its_target(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea. Bye."]);
+    with_mock(&editor, cx, vec![r#"["Tea is love.", "I adore tea."]"#]);
+    editor.update(cx, |e, cx| {
+        e.open_alternates(Some(Scope::Sentence), cx);
+        e.ask_ai_alternates(cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(texts(&editor, cx), vec!["Tea is love. Bye."]);
+    let listed = rows(&editor, cx);
+    assert_eq!(listed.len(), 3);
+    assert_eq!(listed[0], row("I love tea.", false));
+    assert_eq!(listed[1], ("Tea is love.".to_string(), true, true));
+    assert_eq!(listed[2], ("I adore tea.".to_string(), false, true));
+}
