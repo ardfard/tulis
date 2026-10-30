@@ -9,7 +9,8 @@ use sha2::{Digest, Sha256};
 
 use crate::model::Document;
 
-pub const FORMAT_VERSION: u32 = 1;
+/// Version 2 keeps the Overflow scratchpad as one string; version 1 kept a list of items.
+pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
@@ -149,8 +150,8 @@ fn read_sidecar(path: &Path, notices: &mut Vec<String>) -> Option<SidecarIn> {
             return None;
         }
     };
-    match serde_json::from_slice::<SidecarHeader>(&bytes) {
-        Ok(header) if header.format_version == FORMAT_VERSION => {}
+    let version = match serde_json::from_slice::<SidecarHeader>(&bytes) {
+        Ok(header) if matches!(header.format_version, 1 | FORMAT_VERSION) => header.format_version,
         Ok(header) => {
             notices.push(format!(
                 "Ignoring sidecar with unknown format version {}",
@@ -162,8 +163,16 @@ fn read_sidecar(path: &Path, notices: &mut Vec<String>) -> Option<SidecarIn> {
             notices.push(format!("Ignoring unreadable sidecar: {e}"));
             return None;
         }
-    }
-    match serde_json::from_slice::<SidecarIn>(&bytes) {
+    };
+    let parsed = if version == 1 {
+        serde_json::from_slice::<serde_json::Value>(&bytes).and_then(|mut json| {
+            migrate_v1(&mut json);
+            serde_json::from_value::<SidecarIn>(json)
+        })
+    } else {
+        serde_json::from_slice::<SidecarIn>(&bytes)
+    };
+    match parsed {
         Ok(sidecar) => match sidecar.document.validate() {
             Ok(()) => Some(sidecar),
             Err(reason) => {
@@ -176,6 +185,29 @@ fn read_sidecar(path: &Path, notices: &mut Vec<String>) -> Option<SidecarIn> {
             None
         }
     }
+}
+
+/// A version 1 sidecar's overflow items become the scratchpad's text: their texts, in order,
+/// joined by blank lines.
+fn migrate_v1(sidecar: &mut serde_json::Value) {
+    let Some(document) = sidecar
+        .get_mut("document")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let texts: Vec<&str> = document
+        .get("overflow")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("text").and_then(serde_json::Value::as_str))
+                .collect()
+        })
+        .unwrap_or_default();
+    let joined = texts.join("\n\n");
+    document.insert("overflow".into(), joined.into());
 }
 
 /// Rebuild a document from Markdown paragraphs, reusing sidecar paragraphs whose export text
@@ -336,6 +368,57 @@ mod tests {
                     .to_string()
             ]
         );
+    }
+
+    /// Rewrite a saved sidecar as version 1, whose overflow was a list of items.
+    fn downgrade_to_v1(md: &Path, items: &[&str]) {
+        let side = sidecar_path(md);
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(&side).unwrap()).unwrap();
+        json["format_version"] = 1.into();
+        json["document"]["overflow"] = items
+            .iter()
+            .enumerate()
+            .map(|(i, text)| {
+                serde_json::json!({
+                    "id": 90 + i,
+                    "text": text,
+                    "created_at": "2026-10-28T09:00:00Z",
+                    "from_paragraph": null,
+                })
+            })
+            .collect();
+        fs::write(&side, serde_json::to_vec(&json).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn version_1_sidecar_overflow_items_are_joined_and_saved_as_version_2() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("essay.md");
+        let doc = rich_doc();
+        save(&doc, &path).unwrap();
+        downgrade_to_v1(&path, &["first", "second\nline"]);
+        let opened = open(&path).unwrap();
+        assert!(opened.notices.is_empty(), "{:?}", opened.notices);
+        assert_eq!(opened.document.overflow, "first\n\nsecond\nline");
+        assert_eq!(opened.document.paragraphs, doc.paragraphs);
+        save(&opened.document, &path).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_slice(&fs::read(sidecar_path(&path)).unwrap()).unwrap();
+        assert_eq!(json["format_version"], 2);
+        assert_eq!(json["document"]["overflow"], "first\n\nsecond\nline");
+        assert_eq!(open(&path).unwrap().document, opened.document);
+    }
+
+    #[test]
+    fn version_1_sidecar_without_overflow_items_opens_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("essay.md");
+        save(&Document::from_texts(&["Text."]), &path).unwrap();
+        downgrade_to_v1(&path, &[]);
+        let opened = open(&path).unwrap();
+        assert!(opened.notices.is_empty(), "{:?}", opened.notices);
+        assert_eq!(opened.document.overflow, "");
     }
 
     #[test]

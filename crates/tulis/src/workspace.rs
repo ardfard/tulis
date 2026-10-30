@@ -668,6 +668,38 @@ mod tests {
         ws.update_in(cx, |ws, _, cx| assert!(!ws.save_now(cx)));
     }
 
+    #[gpui::test]
+    fn opening_a_version_1_sidecar_joins_its_overflow_and_saves_version_2(cx: &mut TestAppContext) {
+        init(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("essay.md");
+        tulis_core::storage::save(&tulis_core::Document::from_texts(&["Hello."]), &path).unwrap();
+        // Today's sidecar, rewritten in the version 1 format: overflow was a list of items.
+        let side = tulis_core::storage::sidecar_path(&path);
+        let items = r#"[
+            {"id": 7, "text": "Old idea.", "created_at": "2026-10-28T09:00:00Z", "from_paragraph": null},
+            {"id": 8, "text": "Another one.", "created_at": "2026-10-28T09:05:00Z", "from_paragraph": null}
+        ]"#;
+        let v1 = std::fs::read_to_string(&side)
+            .unwrap()
+            .replace(r#""format_version": 2"#, r#""format_version": 1"#)
+            .replace(r#""overflow": """#, &format!(r#""overflow": {items}"#));
+        std::fs::write(&side, v1).unwrap();
+        let open_path = path.clone();
+        let (ws, cx) = cx.add_window_view(move |window, cx| {
+            Workspace::new(Config::default(), None, Some(open_path), window, cx)
+        });
+        let overflow = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.overflow.clone());
+        assert_eq!(overflow, "Old idea.\n\nAnother one.");
+        ws.update_in(cx, |ws, _, cx| assert!(ws.save_now(cx)));
+        let saved = std::fs::read_to_string(&side).unwrap();
+        assert!(saved.contains(r#""format_version": 2"#), "{saved}");
+        assert!(
+            saved.contains(r#""overflow": "Old idea.\n\nAnother one.""#),
+            "{saved}"
+        );
+    }
+
     /// gpui-component widgets need their globals; some tests also press keys.
     fn init(cx: &mut TestAppContext) {
         cx.update(|cx| {
