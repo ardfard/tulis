@@ -57,8 +57,29 @@ pub(crate) fn line_height(editor: &Editor) -> Pixels {
     px(editor.config.editor.effective_font_size() * 1.8)
 }
 
+/// `c` with its alpha scaled by `alpha`.
+fn faded(mut c: gpui::Hsla, alpha: f32) -> gpui::Hsla {
+    c.a *= alpha;
+    c
+}
+
+/// The run style for a paragraph at text alpha `alpha`: everything it paints dims with it.
+pub(crate) fn run_style(editor: &Editor, alpha: f32) -> RunStyle {
+    let mut title_font = font(editor.font_family.clone());
+    title_font.weight = FontWeight::BOLD;
+    RunStyle {
+        font: font(editor.font_family.clone()),
+        title_font,
+        color: faded(editor.theme.text, alpha),
+        fade_alpha: editor.theme.fade_alpha,
+        mark_tint: faded(editor.theme.mark_tint, alpha),
+        marker: faded(editor.theme.text_muted, 0.5 * alpha),
+        ghost_alpha: editor.theme.ghost_alpha,
+    }
+}
+
 /// Shape every paragraph at `width`. GPUI caches shaped lines between frames, so this is cheap.
-fn build_layout(
+pub(super) fn build_layout(
     editor: &Editor,
     width: Pixels,
     origin: Point<Pixels>,
@@ -66,25 +87,8 @@ fn build_layout(
 ) -> LayoutCache {
     let font_size = px(editor.config.editor.effective_font_size());
     let lh = line_height(editor);
-    let mut title_font = font(editor.font_family.clone());
-    title_font.weight = FontWeight::BOLD;
-    let style_with_alpha = |alpha: f32| {
-        let faded = |mut c: gpui::Hsla, a: f32| {
-            c.a *= a;
-            c
-        };
-        RunStyle {
-            font: font(editor.font_family.clone()),
-            title_font: title_font.clone(),
-            color: faded(editor.theme.text, alpha),
-            fade_alpha: editor.theme.fade_alpha,
-            mark_tint: editor.theme.mark_tint,
-            marker: faded(editor.theme.text_muted, 0.5 * alpha),
-            ghost_alpha: editor.theme.ghost_alpha,
-        }
-    };
-    let style = style_with_alpha(1.);
-    let dimmed = style_with_alpha(DIM_ALPHA);
+    let style = run_style(editor, 1.);
+    let dimmed = run_style(editor, DIM_ALPHA);
     let page_dimmed = editor.page_dimmed(window);
     let marked = editor.marked.clone().map(|r| {
         (
@@ -141,10 +145,11 @@ fn build_layout(
 
 /// Dotted underlines under alternate groups, version bars with their handles (recorded in
 /// `layout.version_handles` for clicks), and the box around a group just cycled.
-fn marker_quads(
+pub(super) fn marker_quads(
     editor: &Editor,
     layout: &mut LayoutCache,
     view: Option<(Pixels, Pixels)>,
+    page_dimmed: bool,
 ) -> Vec<PaintQuad> {
     let t = &editor.theme;
     let lh = layout.line_height;
@@ -156,9 +161,10 @@ fn marker_quads(
         if !markers::intersects_viewport(para_top, pl.height(lh), view, lh) {
             continue;
         }
+        let alpha = paragraph_alpha(editor, p.id, page_dimmed);
         for span in p.spans() {
             let Some(mark) = span.alt else { continue };
-            let color = if mark.ai { t.accent } else { t.text_muted };
+            let color = faded(if mark.ai { t.accent } else { t.text_muted }, alpha);
             for (k, r) in markers::split_by_lines(&pl.line_starts, pl.line.len(), span.range) {
                 let x0 = left + pl.x_in_line(k, r.start);
                 let x1 = left + pl.x_in_line(k, r.end);
@@ -171,14 +177,13 @@ fn marker_quads(
         }
         if p.versions.len() > 1 {
             let height = pl.height(lh);
-            let mut bar = t.accent;
-            bar.a *= 0.6;
+            let bar = faded(t.accent, 0.6 * alpha);
             quads.push(fill(markers::version_bar(left, para_top, height), bar));
             let handle = markers::version_handle(left, para_top, height);
             let c = handle.center();
             let gap = Bounds::new(point(c.x - px(2.), c.y - px(7.)), size(px(4.), px(14.)));
             quads.push(fill(gap, t.background));
-            quads.extend(markers::handle_dots(handle).map(|dot| fill(dot, t.accent)));
+            quads.extend(markers::handle_dots(handle).map(|dot| fill(dot, faded(t.accent, alpha))));
             layout.version_handles.push((ix, handle));
         }
     }
@@ -330,7 +335,7 @@ impl Element for EditorElement {
             let viewport = editor.scroll.bounds();
             let view = (viewport.size.height > px(0.))
                 .then(|| (viewport.origin.y, viewport.origin.y + viewport.size.height));
-            marker_quads(editor, &mut layout, view)
+            marker_quads(editor, &mut layout, view, editor.page_dimmed(window))
         } else {
             Vec::new()
         };

@@ -1168,6 +1168,53 @@ fn the_page_dims_except_the_target_paragraph_while_the_sidebar_is_open(cx: &mut 
 }
 
 #[gpui::test]
+fn dimmed_paragraphs_scale_their_tints_underlines_and_version_bars(cx: &mut TestAppContext) {
+    use super::element::{DIM_ALPHA, build_layout, marker_quads, run_style};
+    use gpui::Background;
+    let (editor, cx) = editor_with(cx, &["One.", "I love tea"]);
+    editor.update(cx, |e, cx| {
+        e.doc.add_option(1, 2..6, "adore".into()).unwrap();
+        e.doc.add_version(1, "I like tea".into());
+        e.doc.set_active_version(1, 0);
+        e.show_markers = true;
+        e.selection = Selection::caret(DocPos::new(0, 1));
+        e.open_alternates(None, cx);
+    });
+    let (dim, full) = cx.update(|window, cx| {
+        let e = editor.read(cx);
+        let mut layout = build_layout(
+            e,
+            gpui::px(600.),
+            gpui::point(gpui::px(0.), gpui::px(0.)),
+            window,
+        );
+        let dim = marker_quads(e, &mut layout, None, true);
+        let full = marker_quads(e, &mut layout, None, false);
+        (dim, full)
+    });
+    let (t, with_alpha) = editor.read_with(cx, |e, _| {
+        (e.theme, |mut c: gpui::Hsla, a: f32| {
+            c.a *= a;
+            c
+        })
+    });
+    let has = |quads: &[gpui::PaintQuad], c: gpui::Hsla| {
+        quads.iter().any(|q| q.background == Background::from(c))
+    };
+    // The version bar and the dotted underline of the dimmed paragraph are scaled...
+    assert!(has(&dim, with_alpha(t.accent, 0.6 * DIM_ALPHA)));
+    assert!(has(&dim, with_alpha(t.text_muted, DIM_ALPHA)));
+    assert!(!has(&dim, with_alpha(t.accent, 0.6)));
+    assert!(!has(&dim, t.text_muted));
+    // ...and undimmed they keep their colors.
+    assert!(has(&full, with_alpha(t.accent, 0.6)));
+    assert!(has(&full, t.text_muted));
+    // So is the mark tint of the dimmed paragraph's runs.
+    let style = editor.read_with(cx, |e, _| run_style(e, DIM_ALPHA));
+    assert_eq!(style.mark_tint, with_alpha(t.mark_tint, DIM_ALPHA));
+}
+
+#[gpui::test]
 fn right_click_targets_the_selection_or_the_word_under_the_pointer(cx: &mut TestAppContext) {
     let (editor, cx) = editor_with(cx, &["I love green tea", ""]);
     editor.update(cx, |e, cx| e.target_for_context_menu(DocPos::new(0, 8), cx));
