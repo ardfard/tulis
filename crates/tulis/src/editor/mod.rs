@@ -128,6 +128,9 @@ pub struct Editor {
     pub(crate) history: History<Snapshot, OverflowOp>,
     /// Bumped whenever `doc.overflow` changes, so the scratchpad knows when to re-read it.
     pub(crate) overflow_gen: u64,
+    /// Bumped by every `load`: views of per-document state (the scratchpad field, the sidebar
+    /// field) start afresh when it changes.
+    pub(crate) doc_gen: u64,
     /// The newest change to `doc.overflow` appended a block at its end (a stash).
     pub(crate) overflow_appended: bool,
     /// The sidebar's focus handles (its list and text field), set by the workspace.
@@ -179,6 +182,7 @@ impl Editor {
             register_linewise: false,
             history: History::new(HISTORY_LIMIT),
             overflow_gen: 0,
+            doc_gen: 0,
             overflow_appended: false,
             sidebar_focus: Vec::new(),
             focus_handle: cx.focus_handle(),
@@ -192,6 +196,7 @@ impl Editor {
     /// Replace the document (open/new). Clears history and transient state.
     pub fn load(&mut self, doc: Document, cx: &mut Context<Self>) {
         self.doc = doc;
+        self.doc_gen += 1;
         self.selection = Selection::default();
         self.history = History::new(HISTORY_LIMIT);
         self.overflow_changed(false);

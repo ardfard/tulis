@@ -30,6 +30,8 @@ pub struct Scratchpad {
     pub(crate) hovered: Option<Range<usize>>,
     /// The editor's `overflow_gen` the field last matched.
     seen_gen: u64,
+    /// The editor's `doc_gen` at the last pull: a new document starts the field afresh.
+    seen_doc_gen: u64,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -100,9 +102,9 @@ impl Scratchpad {
             TextareaState::new(window, cx)
                 .placeholder("Ctrl+Shift+X stashes the selection or paragraph here.")
         });
-        let (text, seen_gen) = {
+        let (text, seen_gen, seen_doc_gen) = {
             let e = editor.read(cx);
-            (e.doc.overflow.clone(), e.overflow_gen)
+            (e.doc.overflow.clone(), e.overflow_gen, e.doc_gen)
         };
         input.update(cx, |input, cx| input.set_value(text, window, cx));
         let subscriptions = vec![
@@ -120,6 +122,7 @@ impl Scratchpad {
             input,
             hovered: None,
             seen_gen,
+            seen_doc_gen,
             _subscriptions: subscriptions,
         }
     }
@@ -208,12 +211,22 @@ impl Scratchpad {
     fn pull(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         cx.notify();
         let editor = self.editor.read(cx);
-        if editor.overflow_gen == self.seen_gen {
+        let new_doc = editor.doc_gen != self.seen_doc_gen;
+        if editor.overflow_gen == self.seen_gen && !new_doc {
             return;
         }
         self.seen_gen = editor.overflow_gen;
+        self.seen_doc_gen = editor.doc_gen;
         let (text, appended) = (editor.doc.overflow.clone(), editor.overflow_appended);
         self.input.update(cx, |input, cx| {
+            if new_doc {
+                // A different document: even identical text must not keep the old undo
+                // history, and the caret starts at the top.
+                input.set_value(text, window, cx);
+                input.set_selected_range(0..0, cx);
+                input.set_scroll_offset(point(px(0.), px(0.)), cx);
+                return;
+            }
             if input.value().as_ref() == text {
                 return;
             }

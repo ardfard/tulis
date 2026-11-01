@@ -2037,4 +2037,27 @@ mod tests {
         assert!(!ws.read_with(cx, |ws, _| ws.preview));
         assert!(page_focused(&ws, cx));
     }
+    #[gpui::test]
+    fn the_scratchpad_undo_history_does_not_survive_loading_another_document(
+        cx: &mut TestAppContext,
+    ) {
+        let (ws, cx) = root_workspace(cx, &["Page."]);
+        cx.simulate_keystrokes("secondary-shift-\\");
+        cx.run_until_parked();
+        cx.simulate_input("secret");
+        cx.simulate_keystrokes("secondary-a backspace");
+        cx.run_until_parked();
+        assert_eq!(scratchpad_value(&ws, cx), "");
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.update(cx, |e, cx| {
+            e.load(tulis_core::Document::from_texts(&["Other."]), cx)
+        });
+        cx.run_until_parked();
+        focus_scratchpad(&ws, cx);
+        cx.simulate_keystrokes("secondary-z");
+        cx.run_until_parked();
+        let overflow = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.overflow.clone());
+        assert_eq!(overflow, "");
+        assert_eq!(scratchpad_value(&ws, cx), "");
+    }
 }
