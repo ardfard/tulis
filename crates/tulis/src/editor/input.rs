@@ -79,8 +79,12 @@ impl EntityInputHandler for Editor {
         cx: &mut Context<Self>,
     ) {
         // A walk through a trim preview captures plain `y` and `n`.
-        if self.walking() && (text == "y" || text == "n") {
-            return self.walk_step(text == "y", cx);
+        // Any other text would replace the selected cut: swallow it.
+        if self.walking() {
+            if text == "y" || text == "n" {
+                self.walk_step(text == "y", cx);
+            }
+            return;
         }
         if self.vim_captures_text() {
             for ch in text.chars() {
@@ -107,7 +111,7 @@ impl EntityInputHandler for Editor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.vim_captures_text() {
+        if self.walking() || self.vim_captures_text() {
             return;
         }
         let flat = self.doc.flat_text();

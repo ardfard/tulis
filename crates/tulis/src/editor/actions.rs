@@ -215,6 +215,10 @@ impl Editor {
     }
 
     pub(super) fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+        // A walk's selected cut isn't text to delete.
+        if self.walking() {
+            return;
+        }
         let sel = self.selection;
         if !sel.is_empty() {
             self.delete_range(sel.range(), EditKind::Other, cx);

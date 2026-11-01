@@ -409,6 +409,24 @@ fn walking_through_cuts_or_keeps_each_cut_in_turn(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn other_text_and_delete_during_a_walk_leave_the_text_alone(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea, truly."]);
+    preview(&editor, cx, &[(0, 2..9), (0, 17..24)]);
+    editor.update(cx, |e, cx| e.bar_action(BarAction::Walk, cx));
+    type_str(&editor, cx, " ");
+    type_str(&editor, cx, "x");
+    editor.update_in(cx, |e, window, cx| e.delete(&Delete, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["I really love tea, truly."]);
+    assert_eq!(bar_title(&editor, cx).as_deref(), Some("Cut 1 of 2"));
+    assert_eq!(
+        selected(&editor, cx),
+        (DocPos::new(0, 2), DocPos::new(0, 9))
+    );
+    type_str(&editor, cx, "y");
+    assert_eq!(bar_title(&editor, cx).as_deref(), Some("Cut 2 of 2"));
+}
+
+#[gpui::test]
 fn escape_stops_the_walk_and_leaves_the_rest_of_the_preview(cx: &mut TestAppContext) {
     let (editor, cx) = editor_with(cx, &["I really love tea, truly."]);
     preview(&editor, cx, &[(0, 2..9), (0, 17..24)]);
