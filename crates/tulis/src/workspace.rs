@@ -1998,4 +1998,43 @@ mod tests {
         assert!(ws.read_with(cx, |ws, _| ws.dim_timer.is_some()));
         ws.update(cx, |ws, _| assert!(ws.header_dim.on_mouse_move()));
     }
+    fn preview_has_focus(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {
+        ws.update_in(cx, |ws, window, _| ws.preview_focus.is_focused(window))
+    }
+
+    #[gpui::test]
+    fn sidebar_esc_and_keep_return_focus_to_the_open_preview(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["I love tea"]);
+        ws.update(cx, |ws, cx| {
+            ws.editor.update(cx, |e, cx| {
+                e.doc.add_option(0, 2..6, "adore".into()).unwrap();
+                e.selection = Selection::caret(DocPos::new(0, 3));
+                e.open_alternates(None, cx);
+            })
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("secondary-shift-m");
+        cx.run_until_parked();
+        assert!(preview_has_focus(&ws, cx));
+        for key in ["escape", "enter"] {
+            let list = ws.read_with(cx, |ws, cx| {
+                ws.alt_sidebar.as_ref().unwrap().read(cx).list_focus.clone()
+            });
+            if key == "enter" {
+                ws.update(cx, |ws, cx| {
+                    ws.editor.update(cx, |e, cx| e.open_alternates(None, cx))
+                });
+            }
+            cx.update(|window, cx| window.focus(&list, cx));
+            cx.run_until_parked();
+            assert!(sidebar_focused(&ws, cx), "{key}");
+            cx.simulate_keystrokes(key);
+            cx.run_until_parked();
+            assert!(preview_has_focus(&ws, cx), "{key}");
+        }
+        cx.simulate_keystrokes("secondary-shift-m");
+        cx.run_until_parked();
+        assert!(!ws.read_with(cx, |ws, _| ws.preview));
+        assert!(page_focused(&ws, cx));
+    }
 }

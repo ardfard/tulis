@@ -317,7 +317,7 @@ impl Workspace {
                                 .label(action.label())
                                 .on_click(cx.listener(move |ws, _: &ClickEvent, window, cx| {
                                     ws.editor.update(cx, |e, cx| e.bar_action(action, cx));
-                                    ws.focus_editor(window, cx);
+                                    window.focus(&ws.main_focus(cx), cx);
                                 })),
                         )
                 })),

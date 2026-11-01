@@ -3,7 +3,7 @@
 
 use gpui::{
     App, ClickEvent, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
-    Styled, Subscription, Window, div, prelude::*, px,
+    Styled, Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 use gpui_component::Sizable;
 use gpui_component::input::{Input, InputEvent, InputState};
@@ -19,6 +19,7 @@ pub const SIDEBAR_WIDTH: f32 = 240.;
 
 pub struct AltSidebar {
     editor: Entity<Editor>,
+    workspace: WeakEntity<Workspace>,
     /// Focus of the option list (its keys: arrows, j/k, Enter, Delete, dd, i/o).
     pub(crate) list_focus: FocusHandle,
     /// The type-to-add row.
@@ -27,7 +28,12 @@ pub struct AltSidebar {
 }
 
 impl AltSidebar {
-    pub fn new(editor: Entity<Editor>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        editor: Entity<Editor>,
+        workspace: WeakEntity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let input =
             cx.new(|cx| InputState::new(window, cx).placeholder("type another way to say it…"));
         let subscriptions = vec![
@@ -40,6 +46,7 @@ impl AltSidebar {
         ];
         Self {
             editor,
+            workspace,
             list_focus: cx.focus_handle(),
             input,
             _subscriptions: subscriptions,
@@ -101,8 +108,11 @@ impl AltSidebar {
 
     fn keep_row(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.editor.update(cx, |e, cx| e.keep_alternate(index, cx));
-        let page = self.editor.focus_handle(cx);
-        window.focus(&page, cx);
+        let main = match self.workspace.upgrade() {
+            Some(ws) => ws.read(cx).main_focus(cx),
+            None => self.editor.focus_handle(cx),
+        };
+        window.focus(&main, cx);
     }
 
     fn remove(&mut self, _: &AltRemove, _: &mut Window, cx: &mut Context<Self>) {
@@ -243,9 +253,10 @@ impl Workspace {
     /// The editor opened the sidebar: create its view on first use and focus its list.
     pub(crate) fn alternates_opened(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let editor = self.editor.clone();
+        let workspace = cx.entity().downgrade();
         let sidebar = self
             .alt_sidebar
-            .get_or_insert_with(|| cx.new(|cx| AltSidebar::new(editor, window, cx)))
+            .get_or_insert_with(|| cx.new(|cx| AltSidebar::new(editor, workspace, window, cx)))
             .clone();
         let focus = sidebar.read(cx).list_focus.clone();
         let handles = vec![focus.clone(), sidebar.read(cx).input.focus_handle(cx)];
@@ -261,8 +272,8 @@ impl Workspace {
             .alt_sidebar
             .as_ref()
             .is_some_and(|s| s.read(cx).has_focus(window, cx));
-        if had_focus && !self.preview {
-            self.focus_editor(window, cx);
+        if had_focus {
+            window.focus(&self.main_focus(cx), cx);
         }
         cx.notify();
     }
