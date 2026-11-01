@@ -66,6 +66,8 @@ pub enum EditorEvent {
     AlternatesClosed,
     /// A Lab run finished (the popover, kept open while it worked, closes).
     LabDone,
+    /// `load` replaced the document: the workspace closes whatever described the old one.
+    Loaded,
 }
 
 impl gpui::EventEmitter<EditorEvent> for Editor {}
@@ -212,6 +214,7 @@ impl Editor {
         self.goal_x = None;
         self.dirty = false;
         self.autoscroll = true;
+        cx.emit(EditorEvent::Loaded);
         cx.notify();
     }
 

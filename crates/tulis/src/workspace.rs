@@ -7,6 +7,7 @@ use gpui::{
     PathPromptOptions, PromptLevel, SharedString, Subscription, Task, Window, div,
     linear_color_stop, linear_gradient, prelude::*, px,
 };
+use gpui_component::WindowExt;
 use gpui_component::menu::ContextMenuExt;
 use gpui_component::text::TextView;
 use tulis_core::Document;
@@ -70,6 +71,7 @@ impl Workspace {
                         EditorEvent::AlternatesOpened => ws.alternates_opened(window, cx),
                         EditorEvent::AlternatesClosed => ws.alternates_closed(window, cx),
                         EditorEvent::LabDone => ws.close_lab(cx),
+                        EditorEvent::Loaded => ws.document_loaded(window, cx),
                     }
                 }),
                 cx.subscribe(&lab, |ws, _, event: &LabEvent, cx| match event {
@@ -195,6 +197,20 @@ impl Workspace {
         });
         self.lab.update(cx, |lab, cx| lab.reset(scope, cx));
         self.lab_open = true;
+        cx.notify();
+    }
+
+    /// Another document replaced the one the Lab, the cheat sheet and the Markdown preview
+    /// were showing: close them and forget the Lab's scope.
+    fn document_loaded(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_lab(cx);
+        self.lab.update(cx, |lab, cx| lab.reset(Vec::new(), cx));
+        if self.cheat_sheet.take().is_some() && window.has_active_dialog(cx) {
+            window.close_dialog(cx);
+        }
+        if std::mem::take(&mut self.preview) {
+            self.focus_editor(window, cx);
+        }
         cx.notify();
     }
 
@@ -806,7 +822,7 @@ mod tests {
         });
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
-        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
+        assert!(!cx.update(gpui_component::WindowExt::has_active_dialog));
     }
 
     #[gpui::test]
@@ -828,7 +844,7 @@ mod tests {
         assert!(cx.update(|window, cx| window.has_active_dialog(cx)));
         cx.simulate_keystrokes("secondary-shift-/");
         cx.run_until_parked();
-        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
+        assert!(!cx.update(gpui_component::WindowExt::has_active_dialog));
     }
 
     #[gpui::test]
@@ -2059,5 +2075,30 @@ mod tests {
         let overflow = ws.read_with(cx, |ws, cx| ws.editor.read(cx).doc.overflow.clone());
         assert_eq!(overflow, "");
         assert_eq!(scratchpad_value(&ws, cx), "");
+    }
+    #[gpui::test]
+    fn loading_a_document_closes_the_lab_the_preview_and_the_cheat_sheet(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["One.", "Two.", "Three."]);
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(1, 1)));
+        cx.simulate_keystrokes("secondary-shift-t");
+        draw(cx);
+        assert!(lab_open(&ws, cx));
+        assert_eq!(lab_scope(&ws, cx), vec![1]);
+        ws.update_in(cx, |ws, window, cx| {
+            ws.preview = true;
+            ws.show_cheat_sheet(&crate::actions::ShowCheatSheet, window, cx)
+        });
+        draw(cx);
+        let path = std::env::temp_dir().join(format!("tulis-load-{}.md", std::process::id()));
+        std::fs::write(&path, "A.\n\nB.\n\nC.\n").unwrap();
+        ws.update(cx, |ws, cx| ws.open_path(path.clone(), cx));
+        draw(cx);
+        std::fs::remove_file(&path).ok();
+        assert!(!lab_open(&ws, cx));
+        assert!(ws.read_with(cx, |ws, cx| ws.lab.read(cx).scope.is_empty()));
+        assert!(!ws.read_with(cx, |ws, _| ws.preview));
+        assert!(!cx.update(gpui_component::WindowExt::has_active_dialog));
+        assert!(page_focused(&ws, cx));
     }
 }
