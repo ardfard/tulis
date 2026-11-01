@@ -616,6 +616,7 @@ impl Editor {
     }
 
     fn after_history(&mut self, cx: &mut Context<Self>) {
+        self.lab_fixes = None;
         self.alt_edit = None;
         self.cycled = None;
         // A restored snapshot may hold an alternate whose active option is empty.

@@ -638,6 +638,19 @@ fn fixes_become_ai_alternates_in_one_undo_step(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn undoing_a_fix_removes_the_fixes_bar(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Teh end."]);
+    mock(&editor, cx, &[r#"[{"original": "Teh", "fixed": "The"}]"#]);
+    let all = ids(&editor, cx);
+    editor.update(cx, |e, cx| e.run_check(Check::Fix, &all, cx));
+    cx.run_until_parked();
+    assert!(editor.read_with(cx, |e, _| e.lab_bar()).is_some());
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert_eq!(texts(&editor, cx), vec!["Teh end."]);
+    assert!(editor.read_with(cx, |e, _| e.lab_bar()).is_none());
+}
+
+#[gpui::test]
 fn a_fix_check_with_nothing_to_fix_changes_nothing(cx: &mut TestAppContext) {
     let (editor, cx) = editor_with(cx, &["All good."]);
     mock(&editor, cx, &["[]"]);
