@@ -1253,6 +1253,26 @@ fn a_preview_after_undo_records_its_own_undo_step(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_preview_that_shares_the_session_step_clears_redo(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I love tea", "Second."]);
+    editor.update(cx, |e, cx| {
+        e.doc.add_option(0, 2..6, "adore".into()).unwrap();
+        e.doc.add_option(0, 2..7, "like".into()).unwrap();
+        e.doc.set_active_option(0, 1, 0);
+        e.selection = Selection::caret(DocPos::new(0, 3));
+        e.open_alternates(None, cx);
+        e.preview_alternate(1, cx);
+    });
+    assert_eq!(texts(&editor, cx)[0], "I adore tea");
+    editor.update(cx, |e, cx| e.stash_paragraphs(1..2, cx));
+    editor.update_in(cx, |e, window, cx| e.undo(&Undo, window, cx));
+    assert!(editor.read_with(cx, |e, _| e.history.can_redo()));
+    editor.update(cx, |e, cx| e.preview_alternate(2, cx));
+    assert_eq!(texts(&editor, cx)[0], "I like tea");
+    assert!(!editor.read_with(cx, |e, _| e.history.can_redo()));
+}
+
+#[gpui::test]
 fn every_preview_clears_trims_and_the_cycled_box(cx: &mut TestAppContext) {
     let (editor, cx) = three_options(cx);
     editor.update(cx, |e, cx| e.preview_alternate(1, cx));

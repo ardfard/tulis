@@ -124,6 +124,12 @@ impl<S, O> History<S, O> {
         Some(next.state)
     }
 
+    /// Forget the redo steps: an edit that joins an earlier undo step instead of recording a
+    /// new one still makes them stale.
+    pub fn clear_redo(&mut self) {
+        self.redo.clear();
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
@@ -139,6 +145,22 @@ mod tests {
 
     fn s(v: &str) -> String {
         v.to_string()
+    }
+
+    #[test]
+    fn clear_redo_drops_only_the_redo_steps() {
+        let mut h = History::<String>::new(10);
+        let t0 = Instant::now();
+        h.record(EditKind::Other, t0, || s("a"));
+        assert_eq!(h.undo(s("b")), Some(s("a")));
+        assert!(h.can_redo());
+        h.clear_redo();
+        assert!(!h.can_redo());
+        assert_eq!(h.redo(s("a")), None);
+        h.record(EditKind::Other, t0, || s("a"));
+        assert!(h.can_undo());
+        h.clear_redo();
+        assert!(h.can_undo());
     }
 
     #[test]

@@ -367,6 +367,8 @@ impl Editor {
         let shares_step =
             session.preview_step.is_some() && session.preview_step == self.history.newest_undo_id();
         if shares_step {
+            // No new step is recorded, so nothing else would drop a stale redo.
+            self.history.clear_redo();
             self.drop_transient(para..para + 1);
         } else {
             self.begin_edit(EditKind::Other, para..para + 1);
