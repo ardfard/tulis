@@ -427,6 +427,44 @@ fn other_text_and_delete_during_a_walk_leave_the_text_alone(cx: &mut TestAppCont
 }
 
 #[gpui::test]
+fn the_bar_recounts_words_only_when_the_document_or_preview_changed(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["I really love tea, truly.", "It is very good."]);
+    preview(&editor, cx, &[(0, 2..9), (0, 17..24), (1, 6..11)]);
+    let recounts = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+        editor.read_with(cx, |e, _| e.bar_recounts.get())
+    };
+    let title = bar_title(&editor, cx);
+    assert_eq!(title.as_deref(), Some("Slight trim 9 → 6 words · −33%"));
+    assert_eq!(bar_title(&editor, cx), title);
+    assert_eq!(recounts(&editor, cx), 1);
+    // A document edit recounts.
+    editor.update(cx, |e, _| {
+        e.selection = Selection::caret(DocPos::new(1, 16))
+    });
+    type_str(&editor, cx, " now");
+    assert_eq!(
+        bar_title(&editor, cx).as_deref(),
+        Some("Slight trim 10 → 8 words · −20%")
+    );
+    assert_eq!(recounts(&editor, cx), 2);
+    // So does keeping a cut.
+    editor.update(cx, |e, cx| {
+        e.selection = Selection::caret(DocPos::new(0, 4));
+        assert!(e.toggle_cut_at(DocPos::new(0, 4), cx));
+    });
+    assert_eq!(
+        bar_title(&editor, cx).as_deref(),
+        Some("Slight trim 10 → 9 words · −10%")
+    );
+    assert_eq!(recounts(&editor, cx), 3);
+    assert_eq!(
+        bar_title(&editor, cx).as_deref(),
+        Some("Slight trim 10 → 9 words · −10%")
+    );
+    assert_eq!(recounts(&editor, cx), 3);
+}
+
+#[gpui::test]
 fn escape_stops_the_walk_and_leaves_the_rest_of_the_preview(cx: &mut TestAppContext) {
     let (editor, cx) = editor_with(cx, &["I really love tea, truly."]);
     preview(&editor, cx, &[(0, 2..9), (0, 17..24)]);

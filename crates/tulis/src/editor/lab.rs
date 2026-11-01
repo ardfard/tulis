@@ -17,6 +17,10 @@ use tulis_core::{AiKind, DocPos, ParaId, Paragraph, Selection, Source};
 use super::{Editor, EditorEvent};
 use crate::actions::{NextMark, PrevMark};
 
+/// The Lab bar's cached counts, with the state they were computed from: (edit revision,
+/// preview revision, level, cut count) and (words before, words after).
+pub(crate) type BarCacheEntry = ((u64, u64, TrimLevel, usize), (usize, usize));
+
 /// How much a trim asks the AI to cut.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TrimLevel {
@@ -156,6 +160,8 @@ pub struct TrimPreview {
     pub kept: HashSet<usize>,
     /// Walking through the cuts one at a time.
     pub walk: Option<Walk>,
+    /// Bumped by every change to `cuts` or `kept` after construction (the bar's cache key).
+    pub rev: u64,
 }
 
 /// A walk through a trim preview's cuts.
@@ -175,6 +181,7 @@ impl TrimPreview {
             cuts,
             kept: HashSet::new(),
             walk: None,
+            rev: 0,
         }
     }
 
@@ -185,6 +192,7 @@ impl TrimPreview {
 
     /// Remove cut `ix` (once it is ghosted); later indices shift down.
     fn remove(&mut self, ix: usize) {
+        self.rev += 1;
         self.cuts.remove(ix);
         self.kept = self
             .kept
@@ -211,6 +219,7 @@ impl TrimPreview {
 
     /// Keep only the cuts `keep` accepts; kept cuts stay kept. Dropping any ends a walk.
     pub(crate) fn retain(&mut self, keep: impl Fn(&TrimSuggestion) -> bool) {
+        self.rev += 1;
         if !self.cuts.iter().all(&keep) {
             self.walk = None;
         }
@@ -668,8 +677,7 @@ impl Editor {
                 actions: vec![BarAction::Done],
             });
         }
-        let before = stats::document_counts(&self.doc).words;
-        let after = stats::words_without(&self.doc, &self.lab_items());
+        let (before, after) = self.bar_counts(preview);
         let pct = if before == 0 {
             0
         } else {
@@ -799,6 +807,7 @@ impl Editor {
             preview.remove(walk.at);
             walk.at
         } else {
+            preview.rev += 1;
             preview.kept.insert(walk.at);
             walk.at + 1
         };
@@ -856,6 +865,7 @@ impl Editor {
         let Some(ix) = hit else {
             return false;
         };
+        preview.rev += 1;
         if !preview.kept.remove(&ix) {
             preview.kept.insert(ix);
         }
@@ -1116,6 +1126,27 @@ impl Editor {
         self.trim_preview = None;
         self.lab_fixes = None;
         cx.notify();
+    }
+
+    /// The bar's word counts before and after the cuts. Recounted only when the document or
+    /// the preview changed since the last call.
+    fn bar_counts(&self, preview: &TrimPreview) -> (usize, usize) {
+        let key = (
+            self.edit_rev,
+            preview.rev,
+            preview.level,
+            preview.cuts.len(),
+        );
+        if let Some((cached, counts)) = *self.bar_cache.borrow()
+            && cached == key
+        {
+            return counts;
+        }
+        self.bar_recounts.set(self.bar_recounts.get() + 1);
+        let before = stats::document_counts(&self.doc).words;
+        let after = stats::words_without(&self.doc, &self.lab_items());
+        *self.bar_cache.borrow_mut() = Some((key, (before, after)));
+        (before, after)
     }
 
     /// The active cuts of the trim preview, or else the marks, as `(paragraph, range)` in

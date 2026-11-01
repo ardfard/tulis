@@ -98,6 +98,11 @@ pub struct Editor {
     pub marks: Vec<Mark>,
     /// How many fixes the last "Fix punctuation and typos" proposed, while its bar shows.
     pub lab_fixes: Option<usize>,
+    /// Bumped by every recorded edit, undo, redo and load: keys the Lab bar's cached counts.
+    pub(crate) edit_rev: u64,
+    pub(crate) bar_cache: std::cell::RefCell<Option<lab::BarCacheEntry>>,
+    /// How many times the bar's counts were computed (for tests).
+    pub(crate) bar_recounts: std::cell::Cell<usize>,
     /// Located cuts by level, paragraph and the text sent, with the rendered text they index.
     pub(crate) trim_cache: lab::TrimCache,
     pub vim: Option<Vim>,
@@ -162,6 +167,9 @@ impl Editor {
             trim_preview: None,
             marks: Vec::new(),
             lab_fixes: None,
+            edit_rev: 0,
+            bar_cache: Default::default(),
+            bar_recounts: Default::default(),
             trim_cache: lab::TrimCache::default(),
             vim,
             alt_edit: None,
@@ -198,6 +206,7 @@ impl Editor {
     /// Replace the document (open/new). Clears history and transient state.
     pub fn load(&mut self, doc: Document, cx: &mut Context<Self>) {
         self.doc = doc;
+        self.edit_rev += 1;
         self.doc_gen += 1;
         self.selection = Selection::default();
         self.history = History::new(HISTORY_LIMIT);
@@ -337,6 +346,7 @@ impl Editor {
 
     /// Record an undo step (call before mutating).
     pub(crate) fn record_step(&mut self, kind: EditKind) {
+        self.edit_rev += 1;
         let (doc, selection) = (&mut self.doc, self.selection);
         self.history
             .record(kind, Instant::now(), || page_snapshot(doc, selection));
@@ -374,6 +384,7 @@ impl Editor {
     }
 
     pub(crate) fn end_edit(&mut self, cx: &mut Context<Self>) {
+        self.edit_rev += 1;
         self.selection = Selection {
             anchor: self.doc.clamp(self.selection.anchor),
             head: self.doc.clamp(self.selection.head),
@@ -616,6 +627,7 @@ impl Editor {
     }
 
     fn after_history(&mut self, cx: &mut Context<Self>) {
+        self.edit_rev += 1;
         self.lab_fixes = None;
         self.alt_edit = None;
         self.cycled = None;

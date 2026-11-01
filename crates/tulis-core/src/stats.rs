@@ -1,5 +1,6 @@
 //! Word and character counts for the header, and the `# ` title marker.
 
+use std::collections::HashMap;
 use std::ops::Range;
 
 use crate::{DocPos, Document};
@@ -74,29 +75,45 @@ pub fn document_counts(doc: &Document) -> Counts {
 /// cut is a paragraph index and a byte range of that paragraph's rendered text (the Lab's trim
 /// preview counts the words that would remain).
 pub fn words_without(doc: &Document, cuts: &[(usize, Range<usize>)]) -> usize {
+    words_without_grouped(doc, &group_cuts(cuts))
+}
+
+/// `cuts` by paragraph index, ready for `words_without_grouped`.
+pub fn group_cuts(cuts: &[(usize, Range<usize>)]) -> HashMap<usize, Vec<Range<usize>>> {
+    let mut by_para: HashMap<usize, Vec<Range<usize>>> = HashMap::new();
+    for (para, range) in cuts {
+        by_para.entry(*para).or_default().push(range.clone());
+    }
+    by_para
+}
+
+/// `words_without` with the cuts already grouped by paragraph: one pass over the document, with
+/// no search through every cut for every paragraph.
+pub fn words_without_grouped(doc: &Document, cuts: &HashMap<usize, Vec<Range<usize>>>) -> usize {
     doc.paragraphs
         .iter()
         .enumerate()
         .map(|(i, p)| {
             let text = p.text();
             let skip = if i == 0 { title_marker_len(&text) } else { 0 };
-            let ghosts: Vec<Range<usize>> = p
+            // Ghosts and cuts together, by start, so one sweep over the text decides each char.
+            let mut left_out: Vec<Range<usize>> = p
                 .spans()
                 .into_iter()
                 .filter(|s| s.ghost)
                 .map(|s| s.range)
+                .chain(cuts.get(&i).into_iter().flatten().cloned())
                 .collect();
-            let cut_here: Vec<&Range<usize>> = cuts
-                .iter()
-                .filter(|(para, _)| *para == i)
-                .map(|(_, range)| range)
-                .collect();
+            left_out.sort_by_key(|r| r.start);
+            let (mut next, mut covered_to) = (0, 0);
             let kept: String = text
                 .char_indices()
                 .filter(|(at, _)| {
-                    *at >= skip
-                        && !ghosts.iter().any(|g| g.contains(at))
-                        && !cut_here.iter().any(|c| c.contains(at))
+                    while next < left_out.len() && left_out[next].start <= *at {
+                        covered_to = covered_to.max(left_out[next].end);
+                        next += 1;
+                    }
+                    *at >= skip && *at >= covered_to
                 })
                 .map(|(_, c)| c)
                 .collect();
@@ -131,6 +148,22 @@ mod tests {
         assert_eq!(words_without(&d, &[(1, 2..9), (2, 0..7)]), 5);
         // Part of a word leaves the rest of it.
         assert_eq!(words_without(&d, &[(1, 3..5)]), 8);
+    }
+
+    #[test]
+    fn the_grouped_count_matches_the_flat_one() {
+        let mut d = Document::from_texts(&["# My title", "I really love green tea.", "Cut me."]);
+        d.toggle_ghost(1, 14..20).unwrap();
+        // Overlapping and out-of-order cuts in one paragraph, and a paragraph with none.
+        let cuts = [(2, 0..3), (1, 12..20), (1, 2..9), (1, 5..11), (2, 4..7)];
+        let grouped = group_cuts(&cuts);
+        assert_eq!(grouped[&1].len(), 3);
+        assert_eq!(
+            words_without_grouped(&d, &grouped),
+            words_without(&d, &cuts)
+        );
+        assert_eq!(words_without_grouped(&d, &grouped), 4);
+        assert_eq!(words_without_grouped(&d, &HashMap::new()), 8);
     }
 
     #[test]
