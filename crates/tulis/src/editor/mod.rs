@@ -208,6 +208,7 @@ impl Editor {
         self.doc = doc;
         self.edit_rev += 1;
         self.doc_gen += 1;
+        self.click_at = None;
         self.selection = Selection::default();
         self.history = History::new(HISTORY_LIMIT);
         self.overflow_changed(false);

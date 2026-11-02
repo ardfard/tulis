@@ -140,6 +140,7 @@ cargo test --workspace
 - [ ] Ctrl+Shift+G with the cursor in a mark asks for alternatives to the mark
 - [ ] "Fix punctuation and typos" shows each fix as an AI alternate (Alt+↑/↓ compares) with "N fixes proposed"; one Ctrl+Z undoes them all
 - [ ] Closing the Lab (Esc, click outside) while it works shows "Lab stopped" and sends no further requests; a partial failure toasts "N of M paragraphs failed"
+- [ ] Sidebar Esc/Enter with the Markdown preview open returns focus to the preview
 
 ## License
 

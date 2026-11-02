@@ -24,6 +24,8 @@ pub struct AltSidebar {
     pub(crate) list_focus: FocusHandle,
     /// The type-to-add row.
     pub(crate) input: Entity<InputState>,
+    /// The editor's `doc_gen` when the field was last cleared for a new document.
+    seen_doc_gen: u64,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -37,16 +39,27 @@ impl AltSidebar {
         let input =
             cx.new(|cx| InputState::new(window, cx).placeholder("type another way to say it…"));
         let subscriptions = vec![
-            cx.observe(&editor, |_, _, cx| cx.notify()),
+            cx.observe_in(&editor, window, |this, editor, window, cx| {
+                // A different document: the half-typed alternative belongs to the old one.
+                let doc_gen = editor.read(cx).doc_gen;
+                if doc_gen != this.seen_doc_gen {
+                    this.seen_doc_gen = doc_gen;
+                    this.input
+                        .update(cx, |input, cx| input.set_value("", window, cx));
+                }
+                cx.notify();
+            }),
             cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter { .. } = event {
                     this.add_typed(window, cx);
                 }
             }),
         ];
+        let seen_doc_gen = editor.read(cx).doc_gen;
         Self {
             editor,
             workspace,
+            seen_doc_gen,
             list_focus: cx.focus_handle(),
             input,
             _subscriptions: subscriptions,

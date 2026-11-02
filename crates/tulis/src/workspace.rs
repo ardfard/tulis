@@ -2101,4 +2101,36 @@ mod tests {
         assert!(!cx.update(gpui_component::WindowExt::has_active_dialog));
         assert!(page_focused(&ws, cx));
     }
+    #[gpui::test]
+    fn loading_a_document_clears_the_sidebar_field_the_click_and_the_scratchpad_caret(
+        cx: &mut TestAppContext,
+    ) {
+        let (ws, cx) = root_workspace(cx, &["I love tea"]);
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.update(cx, |e, cx| {
+            e.doc.overflow = "Some stashed idea".into();
+            e.overflow_changed(false);
+            e.open_alternates(None, cx);
+            e.click_at = Some((DocPos::new(0, 1), Selection::caret(DocPos::new(0, 1))));
+        });
+        cx.simulate_keystrokes("secondary-shift-\\");
+        cx.run_until_parked();
+        let (pad, field) = ws.read_with(cx, |ws, cx| {
+            (
+                ws.scratchpad.as_ref().unwrap().read(cx).input.clone(),
+                ws.alt_sidebar.as_ref().unwrap().read(cx).input.clone(),
+            )
+        });
+        cx.update(|window, cx| {
+            field.update(cx, |i, cx| i.set_value("half typed", window, cx));
+            pad.update(cx, |i, cx| i.set_selected_range(5..5, cx));
+        });
+        editor.update(cx, |e, cx| {
+            e.load(tulis_core::Document::from_texts(&["Other."]), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(field.read_with(cx, |i, _| i.value().to_string()), "");
+        assert_eq!(pad.read_with(cx, |i, _| i.selected_range()), 0..0);
+        assert!(editor.read_with(cx, |e, _| e.click_at.is_none()));
+    }
 }
