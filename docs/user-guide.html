@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tulis — User Guide</title>
+<style>
+  :root {
+    --bg: #fbf9f4; --fg: #26231f; --muted: #6f6a60; --rule: #e3ddd0;
+    --accent: #6b4fc4; --code-bg: #f1ede3; --note-bg: #f4efe2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14141c; --fg: #e4e2ee; --muted: #9391a3; --rule: #2a2a38;
+      --accent: #a592ee; --code-bg: #1d1d29; --note-bg: #1b1b27;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 1rem; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 17px/1.65 Georgia, "Iowan Old Style", serif;
+    display: grid; grid-template-columns: 15rem minmax(0, 44rem); gap: 3rem;
+    justify-content: center; padding: 0 1.5rem;
+  }
+  nav {
+    position: sticky; top: 0; align-self: start; padding: 2.5rem 0;
+    font: 14px/1.4 system-ui, sans-serif; max-height: 100vh; overflow-y: auto;
+  }
+  nav .brand { font: italic 1.5rem Georgia, serif; margin-bottom: 1.2rem; }
+  nav a { display: block; padding: .25rem 0; color: var(--muted); text-decoration: none; }
+  nav a:hover { color: var(--accent); }
+  main { padding: 2.5rem 0 6rem; }
+  h1 { font-size: 2.4rem; line-height: 1.15; margin: 0 0 .4rem; font-weight: 600; }
+  h2 { font-size: 1.55rem; margin: 3.2rem 0 .8rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); font-weight: 600; }
+  h3 { font-size: 1.1rem; margin: 1.8rem 0 .3rem; font-style: italic; color: var(--accent); font-weight: 600; }
+  p { margin: .7rem 0; }
+  .lede { color: var(--muted); font-size: 1.15rem; }
+  a { color: var(--accent); }
+  code, kbd { font-family: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace; font-size: .86em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 3px; }
+  kbd {
+    background: var(--code-bg); border: 1px solid var(--rule); border-bottom-width: 2px;
+    border-radius: 4px; padding: .05em .4em; white-space: nowrap;
+  }
+  pre { background: var(--code-bg); padding: 1rem 1.2rem; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font: 15px/1.5 system-ui, sans-serif; }
+  th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: .85em; text-transform: uppercase; letter-spacing: .04em; }
+  td:first-child { white-space: nowrap; }
+  .note {
+    background: var(--note-bg); border-left: 3px solid var(--accent);
+    padding: .6rem 1rem; margin: 1.2rem 0; font: 15px/1.55 system-ui, sans-serif;
+  }
+  ol, ul { padding-left: 1.4rem; }
+  li { margin: .3rem 0; }
+  @media (max-width: 860px) {
+    body { display: block; }
+    nav { position: static; padding-bottom: 0; max-height: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="brand">Tulis</div>
+  <a href="#start">Getting started</a>
+  <a href="#files">Files &amp; sidecar</a>
+  <a href="#alternates">Alternates &amp; versions</a>
+  <a href="#sidebar">Alternatives sidebar</a>
+  <a href="#ghosts">Ghosts</a>
+  <a href="#overflow">Overflow scratchpad</a>
+  <a href="#ai">AI alternatives</a>
+  <a href="#lab">The Lab</a>
+  <a href="#vim">Vim mode</a>
+  <a href="#keys">Keyboard reference</a>
+  <a href="#config">Configuration</a>
+  <a href="#limits">Known limits</a>
+</nav>
+
+<main>
+<h1>Tulis</h1>
+<p class="lede">A writing app for playing with your words. Keep alternates inline, ghost passages to judge a paragraph without them, stash text in an Overflow scratchpad, and ask an AI for alternatives or cuts — never rewrites.</p>
+
+<p>In this guide <kbd>Ctrl</kbd> means <kbd>Cmd</kbd> on macOS. Press <kbd>Ctrl</kbd>+<kbd>?</kbd> in the app at any time for a searchable cheat sheet.</p>
+
+<h2 id="start">Getting started</h2>
+<p>Tulis is built with Rust and <a href="https://www.gpui.rs/">GPUI</a>. From the repository root:</p>
+<pre><code>cargo run --release -p tulis -- path/to/essay.md</code></pre>
+<p>The window shows your text in a centered 640px column. The header shows word and character counts and the file name appears in the window title, with a <code>•</code> when there are unsaved changes. The footer has <strong>Save</strong>, <strong>Open</strong>, <strong>Share</strong> (X and LinkedIn), <strong>LAB</strong> and <strong>XYZ</strong> (Overflow) buttons.</p>
+<p>Basic editing works as you expect: arrows, <kbd>Home</kbd>/<kbd>End</kbd>, <kbd>PageUp</kbd>/<kbd>PageDown</kbd>, mouse selection, double-click for a word, triple-click for a paragraph, copy/cut/paste, and IME input. Typing undoes in chunks. If the first paragraph starts with <code># </code> it is shown as a bold title.</p>
+<p>Themes: <kbd>Ctrl</kbd>+<kbd>K</kbd> then <kbd>T</kbd> cycles Midnight, Paper, Sepia and Black for the session. Set a permanent one in the <a href="#config">config</a>.</p>
+
+<h2 id="files">Files &amp; the sidecar</h2>
+<p>Your document is plain Markdown (<code>essay.md</code>). Everything Tulis adds — alternates, ghosts and the Overflow text — lives in a sidecar file next to it, <code>essay.md.tulis.json</code>. The <code>.md</code> stays clean: ghosted text is left out of it, and only the alternate you are showing is written.</p>
+<table>
+  <tr><th>Key</th><th>Action</th></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>Save as</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>Open</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>New</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Q</kbd></td><td>Quit</td></tr>
+</table>
+<p>New, Open, Quit and closing the window ask before discarding unsaved changes.</p>
+<div class="note">If you edit the Markdown in another editor, Tulis keeps the metadata of every paragraph that still matches and tells you how many paragraphs lost theirs.</div>
+
+<h2 id="alternates">Alternates &amp; paragraph versions</h2>
+<p>An <strong>alternate</strong> is another way of saying a word, phrase or sentence, stored inline at the same spot. Text with alternates gets a dotted underline (in the accent colour when an AI wrote it). A paragraph with <strong>versions</strong> gets a bar to the left of the column with a <code>⋮</code> handle; click the handle to open the sidebar on its Paragraph tab.</p>
+<table>
+  <tr><th>Key</th><th>Action</th></tr>
+  <tr><td><kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>Alt</kbd>+<kbd>↓</kbd></td><td>Cycle through the alternates or versions. A faint box marks the group until the cursor leaves it.</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Accept: keep only the one currently shown.</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Backspace</kbd></td><td>Delete the one currently shown.</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>.</kbd></td><td>Show or hide all alternate and version markers.</td></tr>
+</table>
+<p>The header shows an <code>alt i/n</code> badge while your cursor is in a group.</p>
+
+<h2 id="sidebar">The Alternatives sidebar</h2>
+<p>Select some text (or just put the cursor in a word) and press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd> or <kbd>Ctrl</kbd>+<kbd>D</kbd>. A sidebar opens on the left, and the page dims around its target.</p>
+<h3>Tabs</h3>
+<p><strong>Word</strong> (or <strong>Selection</strong> when you have a selection), <strong>Sentence</strong> and <strong>Paragraph</strong>. Each tab lists the options for that level. A <code>●</code> marks the one shown on the page, <code>·</code> the others and <code>✦</code> AI-written ones. Long options clip at three lines.</p>
+<h3>Working in it</h3>
+<ul>
+  <li><kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>j</kbd>/<kbd>k</kbd> preview an option on the page.</li>
+  <li><kbd>Enter</kbd> keeps the highlighted option.</li>
+  <li><kbd>Delete</kbd> or <kbd>dd</kbd> removes it (never the last one).</li>
+  <li><kbd>i</kbd> or <kbd>o</kbd> focuses “type another way to say it…”; type and press <kbd>Enter</kbd> to add and show it.</li>
+  <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> undo and redo; closing the sidebar leaves the whole preview session as a single undo step.</li>
+  <li><kbd>Esc</kbd> closes it and keeps what is shown. <kbd>Esc</kbd> on the page also closes it when there is nothing else to cancel.</li>
+</ul>
+<p>Adding a sentence-level option over a word that already has alternates merges the inner ones, with a toast “Inner alternates merged — Ctrl+Z to restore”. Deleting the target paragraph, or typing inside it, closes the sidebar.</p>
+
+<h2 id="ghosts">Ghosts</h2>
+<p>Ghosting fades a selection or paragraph to about 10% so you can judge how the writing reads without it, without deleting anything. Ghosted text is kept in the sidecar and left out of the saved <code>.md</code> and the Markdown preview.</p>
+<table>
+  <tr><th>Key</th><th>Action</th></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>G</kbd></td><td>Ghost the selection or paragraph; press again on ghosted text to revive it.</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></td><td>Markdown preview (without ghosts). <kbd>Esc</kbd> returns.</td></tr>
+</table>
+
+<h2 id="overflow">Overflow scratchpad</h2>
+<p>Overflow is a free-text scratchpad for lines you cut but don't want to lose. Blocks are separated by blank lines. It saves in the sidecar and has its own undo, so page undo never touches it.</p>
+<h3>Putting text in</h3>
+<p><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>) stashes the selection or paragraph. It is appended after a blank line, a “Stashed to Overflow” toast appears, and the panel stays closed. You can also stash from the right-click menu.</p>
+<h3>The panel</h3>
+<p><kbd>Ctrl</kbd>+<kbd>\</kbd> (or the <strong>XYZ</strong> button) shows or hides the 260px panel on the right. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>\</kbd> moves focus between page and scratchpad, opening it if needed; <kbd>Esc</kbd> in the scratchpad returns to the page.</p>
+<h3>Taking text back out</h3>
+<ul>
+  <li><kbd>Ctrl</kbd>+<kbd>Enter</kbd> in the scratchpad <em>moves</em> its selection (or the block at the cursor) to the page cursor.</li>
+  <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> <em>copies</em> it and keeps focus where it is.</li>
+  <li>Or hover a block, grab its <code>⠿</code> grip and drag it onto the page. Hold <kbd>Ctrl</kbd> to copy instead of move.</li>
+</ul>
+<p>A single page <kbd>Ctrl</kbd>+<kbd>Z</kbd> puts a moved block back.</p>
+
+<h2 id="ai">AI alternatives</h2>
+<p>The AI only suggests; it never rewrites your text. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> (or <kbd>Ctrl</kbd>+<kbd>J</kbd>) to request alternatives for the selection, or for the paragraph (as versions) when nothing is selected. With the sidebar open, the key asks for the sidebar's target instead, as does the sidebar's <strong>✦ Ask AI</strong> row. A cursor inside a Lab mark asks for alternatives to that mark.</p>
+<p>The results arrive as ordinary alternates, so everything in <a href="#alternates">Alternates</a> applies. Without an API key you get a “missing key” notice and nothing is sent. Configure the provider in <a href="#config">Configuration</a>.</p>
+
+<h2 id="lab">The Lab</h2>
+<p>The Lab reviews your writing. Open it with <kbd>Ctrl</kbd>+<kbd>L</kbd> or the <strong>LAB</strong> button; it appears above the button with focus inside. It works on the selection's paragraphs, or the whole document if nothing is selected. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> scopes it to the cursor's paragraph and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> to the whole document.</p>
+<p>Move with the arrows or <kbd>j</kbd>/<kbd>k</kbd>, run with <kbd>Enter</kbd>. Click “what each idea does” to see a one-line description under each check. <kbd>Esc</kbd> closes the Lab and stops a run in progress (“Lab stopped”; no further requests are sent).</p>
+
+<h3>Guide checks</h3>
+<table>
+  <tr><th>Check</th><th>What it does</th></tr>
+  <tr><td>Fix punctuation and typos</td><td>AI proposes corrections as alternates. <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> compares them; the bar says “N fixes proposed”. One <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes them all.</td></tr>
+  <tr><td>Mark the weakest sentences</td><td>AI marks sentences that do the least work.</td></tr>
+  <tr><td>Mark sentences that run long</td><td>Marks sentences over your word limit (<code>long_sentence_words</code>, default 30). No AI or key needed.</td></tr>
+  <tr><td>Mark convoluted sentences</td><td>AI marks sentences that are hard to follow.</td></tr>
+  <tr><td>Mark words that don't fit the tone</td><td>AI marks words that don't match the rest of the document.</td></tr>
+  <tr><td>Mark hedges and filler</td><td>AI marks padding such as “I think”, “maybe”, “really”, “in order to”.</td></tr>
+</table>
+<p>Mark checks tint the passages they find. The bar reads “N marked · &lt;check&gt;” and shows the AI's note for the mark under your cursor. Jump between marks with <kbd>Tab</kbd>/<kbd>Shift</kbd>+<kbd>Tab</kbd> (or <code>]m</code>/<code>[m</code> in vim mode). <strong>Clear</strong> removes them.</p>
+
+<h3>Trim levels</h3>
+<p>A trim level fades the words it would cut so you can see the shorter version in place.</p>
+<table>
+  <tr><th>Level</th><th>Cut target</th></tr>
+  <tr><td>Original</td><td>0%</td></tr>
+  <tr><td>Slight trim</td><td>about 10%</td></tr>
+  <tr><td>Tighten more</td><td>about 20%</td></tr>
+  <tr><td>Even sharper</td><td>about 30%</td></tr>
+  <tr><td>Cut in half</td><td>about 50%</td></tr>
+</table>
+<p>The bar reads “&lt;Level&gt; N → M words · −P%” with “Faded words would go. Click one to keep it.” Choosing a level again is instant (cached).</p>
+<ul>
+  <li><strong>Keep a cut:</strong> click a faded passage (or press <kbd>Enter</kbd> in it). Click again to fade it again.</li>
+  <li><strong>Move between cuts:</strong> <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd>.</li>
+  <li><strong>Make the cuts:</strong> ghosts every faded passage (“Cut N passages”). One <kbd>Ctrl</kbd>+<kbd>Z</kbd> restores them all.</li>
+  <li><strong>Walk through:</strong> selects each cut in turn (“Cut i of n”). <kbd>y</kbd>/<kbd>Enter</kbd> cuts, <kbd>n</kbd>/<kbd>Backspace</kbd> keeps, <kbd>Esc</kbd> stops.</li>
+  <li><strong>Done</strong> (or <kbd>Esc</kbd>) clears the preview with no change.</li>
+</ul>
+<div class="note">Cuts are ghosts, not deletions: you can revive any of them later with <kbd>Ctrl</kbd>+<kbd>/</kbd>.</div>
+
+<h2 id="vim">Vim mode</h2>
+<p>Toggle with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>, or start in it with <code>vim_mode = true</code>. A NORMAL/INSERT badge appears next to the counts.</p>
+<table>
+  <tr><th>Group</th><th>Keys</th></tr>
+  <tr><td>Motions (take counts)</td><td><code>h j k l w b e 0 ^ $ gg G { }</code></td></tr>
+  <tr><td>Enter insert</td><td><code>i a I A o O</code></td></tr>
+  <tr><td>Operators</td><td><code>d c y</code> + motion, <code>dd cc yy</code>, <code>x p P u Ctrl+R</code></td></tr>
+  <tr><td>Visual</td><td><code>v</code> (characters), <code>V</code> (whole paragraphs)</td></tr>
+  <tr><td>Alternates</td><td><code>]a</code> / <code>[a</code> cycle alternates; <code>]m</code> / <code>[m</code> next/previous Lab cut or mark</td></tr>
+  <tr><td>Writing tools</td><td><code>gh</code> ghost, <code>ga</code> sidebar, <code>gA</code> AI alternatives, <code>gs</code> stash</td></tr>
+  <tr><td>Panels</td><td><code>gt</code> theme, <code>gm</code> markers, <code>gp</code> preview, <code>g?</code> cheat sheet, <code>gl</code> Lab, <code>gx</code> Overflow, <code>gX</code> focus Overflow</td></tr>
+</table>
+<p>In Visual mode the <code>g</code> tools act on the selection; in <code>V</code> mode <code>ga gA gs gh</code> act on whole paragraphs, and <code>Vgs</code> removes them like <code>Vd</code>.</p>
+
+<h2 id="keys">Keyboard reference</h2>
+<table>
+  <tr><th>Key</th><th>Action</th></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd> / <kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Alternatives sidebar</td></tr>
+  <tr><td><kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd></td><td>Cycle alternates / versions</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Accept the shown alternate</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Backspace</kbd></td><td>Delete the shown alternate</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd> / <kbd>Ctrl</kbd>+<kbd>G</kbd></td><td>Ghost / revive</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Stash in Overflow</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>Show/hide Overflow</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>\</kbd></td><td>Focus page ↔ Overflow</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> / <kbd>Ctrl</kbd>+<kbd>J</kbd></td><td>AI alternatives</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>L</kbd></td><td>The Lab (selection or whole document)</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td><td>Lab on the cursor's paragraph</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd></td><td>Lab on the whole document</td></tr>
+  <tr><td><kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Next / previous trim cut or Lab mark</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd></td><td>Toggle vim mode</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd> <kbd>T</kbd></td><td>Cycle theme</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>.</kbd></td><td>Show/hide markers</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></td><td>Markdown preview</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>?</kbd></td><td>Cheat sheet (type to filter, <kbd>Esc</kbd> closes)</td></tr>
+  <tr><td>Right-click / <kbd>Shift</kbd>+<kbd>F10</kbd> / Menu key</td><td>Context menu: Alternatives, AI alternatives, Ghost it / Revive it, Stash this in Overflow</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Shift</kbd>+<kbd>S</kbd> / <kbd>O</kbd> / <kbd>N</kbd> / <kbd>Q</kbd></td><td>Save / Save as / Open / New / Quit</td></tr>
+</table>
+
+<h2 id="config">Configuration</h2>
+<p>Tulis reads <code>~/.config/tulis/config.toml</code> (on macOS, <code>~/Library/Application Support/tulis/config.toml</code>).</p>
+<pre><code>[editor]
+vim_mode = false
+font_family = "IBM Plex Mono"   # falls back to IBM Plex Mono, JetBrains Mono, then the platform mono font
+font_size = 18
+theme = "midnight"              # midnight | paper | sepia | black
+long_sentence_words = 30        # the Lab's "Mark sentences that run long" check
+
+[ai]
+provider = "openai"                         # any OpenAI-compatible endpoint, or "anthropic"
+model = "openrouter/auto"                   # any OpenRouter model id
+api_key_env = "OPENROUTER_API_KEY"          # the key is read from this environment variable
+base_url = "https://openrouter.ai/api/v1"   # e.g. "http://localhost:11434/v1" for Ollama
+num_alternates = 3</code></pre>
+<h3>Using Anthropic directly</h3>
+<pre><code>[ai]
+provider = "anthropic"
+model = "claude-haiku-5-5"
+api_key_env = "ANTHROPIC_API_KEY"
+base_url = ""</code></pre>
+<h3>Using a local model</h3>
+<p>Keep <code>provider = "openai"</code>, set <code>base_url = "http://localhost:11434/v1"</code> for Ollama and point <code>model</code> at a model you have pulled.</p>
+<div class="note">The API key is never stored in the config: export it in your shell (for example <code>export OPENROUTER_API_KEY=…</code>) before launching Tulis. An unknown <code>theme</code> shows a toast and falls back to Midnight.</div>
+
+<h2 id="limits">Known limits</h2>
+<ul>
+  <li>The Sentence tab ends sentences at <code>.</code>, <code>!</code> or <code>?</code> followed by a space or the end of the paragraph.</li>
+  <li>A sentence ending in an abbreviation such as <code>etc.</code> or <code>e.g.</code> runs on into the next one.</li>
+  <li>Other dotted abbreviations end a sentence: “The U.S. economy” splits after “U.S.”.</li>
+  <li>CJK <code>。</code> does not end a sentence.</li>
+</ul>
+</main>
+
+</body>
+</html>
