@@ -1,9 +1,10 @@
 //! The custom element that shapes and paints the document.
 
 use gpui::{
-    App, AvailableSpace, BorderStyle, Bounds, ElementId, ElementInputHandler, Entity, FontWeight,
-    GlobalElementId, InspectorElementId, LayoutId, PaintQuad, Pixels, Point, ScrollHandle, Style,
-    TextAlign, Window, fill, font, outline, point, prelude::*, px, relative, size,
+    App, AvailableSpace, BorderStyle, Bounds, ContentMask, ElementId, ElementInputHandler, Entity,
+    FontWeight, GlobalElementId, InspectorElementId, LayoutId, PaintQuad, Pixels, Point,
+    ScrollHandle, Style, TextAlign, Window, fill, font, outline, point, prelude::*, px, relative,
+    size,
 };
 
 use super::Editor;
@@ -130,7 +131,11 @@ pub(super) fn build_layout(
             .ok()
             .and_then(|lines| lines.into_iter().next())
             .unwrap_or_default();
-        let para = ParaLayout::new(top, line, text_len);
+        // The marker's width comes from the shaped line itself; the title hangs it into the gutter.
+        let x_offset = -line
+            .unwrapped_layout
+            .x_for_index(title_marker.min(line.len()));
+        let para = ParaLayout::new(top, line, text_len, x_offset);
         top += para.height(lh) + lh * 0.6;
         paras.push(para);
     }
@@ -396,11 +401,44 @@ impl Element for EditorElement {
         }
         let lh = prepaint.layout.line_height;
         let text_origin = prepaint.layout.origin;
+        let width = prepaint.layout.width;
         for para in &prepaint.layout.paras {
-            let origin = point(text_origin.x, text_origin.y + para.top);
-            para.line
-                .paint(origin, lh, TextAlign::Left, None, window, cx)
-                .ok();
+            let top = text_origin.y + para.top;
+            if para.x_offset == px(0.) || para.line_count() == 1 {
+                let origin = point(text_origin.x + para.x_offset, top);
+                para.line
+                    .paint(origin, lh, TextAlign::Left, None, window, cx)
+                    .ok();
+                continue;
+            }
+            // A hanging title: the first line is shifted into the gutter, the rest stay in the
+            // column. Paint the line twice, each pass clipped to its part.
+            let wide = |y: Pixels, h: Pixels| ContentMask {
+                bounds: Bounds::new(
+                    point(text_origin.x - GUTTER, y),
+                    size(width + GUTTER * 2., h),
+                ),
+            };
+            let first = Some(wide(top, lh));
+            let rest = Some(wide(top + lh, para.height(lh) - lh));
+            window.with_content_mask(first, |window| {
+                let origin = point(text_origin.x + para.x_offset, top);
+                para.line
+                    .paint(origin, lh, TextAlign::Left, None, window, cx)
+                    .ok();
+            });
+            window.with_content_mask(rest, |window| {
+                para.line
+                    .paint(
+                        point(text_origin.x, top),
+                        lh,
+                        TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    )
+                    .ok();
+            });
         }
         for quad in prepaint.markers {
             window.paint_quad(quad);

@@ -1763,3 +1763,74 @@ fn visual_stash_of_only_blank_text_leaves_no_selection_behind(cx: &mut TestAppCo
     assert_eq!(mode, Some(Mode::Normal));
     assert_eq!(selection.anchor, selection.head);
 }
+
+/// The title's `# ` marker hangs into the left gutter: the text after it lines up with the body.
+#[gpui::test]
+fn title_text_aligns_with_body_and_the_marker_hangs_left(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["# Title", "Body"]);
+    cx.run_until_parked();
+    editor.read_with(cx, |e, _| {
+        let layout = e.layout.as_ref().expect("painted");
+        let title_text = layout.window_point(DocPos::new(0, 2)).unwrap().x;
+        let body = layout.window_point(DocPos::new(1, 0)).unwrap().x;
+        let marker = layout.window_point(DocPos::new(0, 0)).unwrap().x;
+        assert_eq!(title_text, body);
+        assert_eq!(body, layout.origin.x);
+        assert!(marker < layout.origin.x, "marker at {marker:?}");
+        assert!(layout.paras[0].x_offset < gpui::px(0.));
+        assert_eq!(layout.paras[1].x_offset, gpui::px(0.));
+    });
+}
+
+#[gpui::test]
+fn clicking_the_title_line_lands_after_the_marker_or_on_it(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["# Title", "Body"]);
+    cx.run_until_parked();
+    editor.read_with(cx, |e, _| {
+        let layout = e.layout.as_ref().expect("painted");
+        let y = layout.origin.y + layout.line_height / 2.;
+        let body_x = layout.origin.x;
+        let at = |x| layout.pos_for_window_point(gpui::point(x, y));
+        // At the body-text x: right after the marker.
+        assert_eq!(at(body_x + gpui::px(1.)), DocPos::new(0, 2));
+        // In the gutter, over the marker: on the marker.
+        let gutter = at(body_x + layout.paras[0].x_offset + gpui::px(1.));
+        assert_eq!(gutter, DocPos::new(0, 0));
+        assert!(gutter.offset < 2);
+        // Far left of the window clamps to the start.
+        assert_eq!(at(gpui::px(-50.)), DocPos::new(0, 0));
+        // Vertical moves from the body's column 0 land after the marker.
+        assert_eq!(
+            layout.vertical(DocPos::new(1, 0), -1, layout.x_for(DocPos::new(1, 0))),
+            DocPos::new(0, 2)
+        );
+    });
+}
+
+/// A wrapped title keeps every line's text at the column edge (the marker hangs on line one only).
+#[gpui::test]
+fn wrapped_title_lines_all_start_at_the_column_edge(cx: &mut TestAppContext) {
+    let long = format!("# {}", "word ".repeat(80));
+    let (editor, cx) = editor_with(cx, &[long.as_str(), "Body"]);
+    cx.run_until_parked();
+    editor.read_with(cx, |e, _| {
+        let layout = e.layout.as_ref().expect("painted");
+        let para = &layout.paras[0];
+        assert!(para.line_count() >= 2, "title should wrap");
+        let first = layout.window_point(DocPos::new(0, 2)).unwrap().x;
+        let second_start = para.line_starts[1];
+        let second = layout.window_point(DocPos::new(0, second_start)).unwrap().x;
+        assert_eq!(first, layout.origin.x);
+        assert_eq!(second, first);
+        // Clicking at the column edge on line two lands at that line's start.
+        let y = layout.origin.y + layout.line_height * 1.5;
+        let pos = layout.pos_for_window_point(gpui::point(layout.origin.x + gpui::px(1.), y));
+        assert_eq!(pos, DocPos::new(0, second_start));
+        // No line pokes out past the column's right edge.
+        for k in 0..para.line_count() {
+            let (_, end) = para.line_range(k);
+            let end = end.min(para.line.len());
+            assert!(para.x_in_line(k, end) <= layout.width + gpui::px(1.));
+        }
+    });
+}

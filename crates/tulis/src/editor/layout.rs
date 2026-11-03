@@ -21,10 +21,15 @@ pub struct ParaLayout {
     pub line_starts: Vec<usize>,
     /// Byte length of the paragraph text this was shaped from (to detect a stale layout).
     pub text_len: usize,
+    /// Horizontal shift of the paragraph's first visual line (zero or negative). The title hangs
+    /// its `# ` marker into the gutter: the first line is shifted left by the marker's width so the
+    /// text after the marker starts at the column edge. Later lines are not shifted: they wrap at
+    /// the column edge too, so every line of the title aligns with the body text.
+    pub x_offset: Pixels,
 }
 
 impl ParaLayout {
-    pub fn new(top: Pixels, line: WrappedLine, text_len: usize) -> Self {
+    pub fn new(top: Pixels, line: WrappedLine, text_len: usize, x_offset: Pixels) -> Self {
         let mut line_starts = vec![0];
         for boundary in line.wrap_boundaries() {
             let run = &line.unwrapped_layout.runs[boundary.run_ix];
@@ -35,7 +40,13 @@ impl ParaLayout {
             line,
             line_starts,
             text_len,
+            x_offset,
         }
+    }
+
+    /// The shift of visual line `k` (see `x_offset`).
+    pub fn line_shift(&self, k: usize) -> Pixels {
+        if k == 0 { self.x_offset } else { px(0.) }
     }
 
     pub fn line_count(&self) -> usize {
@@ -61,10 +72,10 @@ impl ParaLayout {
         (self.line_starts[k], end)
     }
 
-    /// x of `offset` measured from the start of visual line `k`.
+    /// x of `offset` measured from the column's left edge (so the title's marker is negative).
     pub fn x_in_line(&self, k: usize, offset: usize) -> Pixels {
         let layout = &self.line.unwrapped_layout;
-        layout.x_for_index(offset) - layout.x_for_index(self.line_starts[k])
+        layout.x_for_index(offset) - layout.x_for_index(self.line_starts[k]) + self.line_shift(k)
     }
 
     /// Position of `offset` relative to the paragraph's top-left corner.
@@ -73,8 +84,12 @@ impl ParaLayout {
         point(self.x_in_line(k, offset), line_height * k as f32)
     }
 
+    /// Closest offset to `local` (column x, paragraph-relative y); x left of the shifted first
+    /// line (the gutter beside the marker) lands at the start of the line.
     pub fn index_for(&self, local: Point<Pixels>, line_height: Pixels) -> usize {
-        match self.line.closest_index_for_position(local, line_height) {
+        let k = ((local.y / line_height).floor().max(0.) as usize).min(self.line_count() - 1);
+        let shaped = point((local.x - self.line_shift(k)).max(px(0.)), local.y);
+        match self.line.closest_index_for_position(shaped, line_height) {
             Ok(ix) | Err(ix) => ix,
         }
     }
@@ -124,7 +139,7 @@ impl LayoutCache {
             return DocPos::default();
         };
         let local_y = clamp_px(y - para.top, px(0.), para.height(self.line_height) - px(1.));
-        let local_x = clamp_px(x, px(0.), self.width);
+        let local_x = if x > self.width { self.width } else { x };
         DocPos::new(
             ix,
             para.index_for(point(local_x, local_y), self.line_height),
@@ -202,6 +217,7 @@ mod tests {
                 line: WrappedLine::default(),
                 line_starts,
                 text_len,
+                x_offset: px(0.),
             }],
             version_handles: Vec::new(),
         }
