@@ -61,6 +61,7 @@ The footer has Save, Open, Share to X and LinkedIn, LAB and XYZ (Overflow) butto
 vim_mode = false
 font_family = "IBM Plex Mono"   # falls back to IBM Plex Mono, JetBrains Mono, then the platform mono font
 font_size = 18
+line_height = 1.6                     # multiple of the font size; 1.2–2.4
 theme = "midnight"              # midnight | paper | sepia | black (Ctrl+K T cycles for the session)
 long_sentence_words = 30        # the Lab's "Mark sentences that run long" check
 

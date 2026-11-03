@@ -59,7 +59,7 @@ Every new command has a vim Normal-mode equivalent.
 - **Ctrl+K T** (vim `gt`) cycles presets for the session and toasts the theme name.
 - **Font fallback:** if `font_family` is not installed, try IBM Plex Mono, then JetBrains Mono,
   then the platform monospace font.
-- Line height becomes 1.8× the font size.
+- Line height defaults to 1.6× the font size (`editor.line_height`, clamped to 1.2–2.4); it was 1.8 in the first cut.
 
 ## A. Look & chrome
 

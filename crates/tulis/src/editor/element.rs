@@ -55,7 +55,7 @@ pub(crate) fn paragraph_alpha(editor: &Editor, id: ParaId, page_dimmed: bool) ->
 }
 
 pub(crate) fn line_height(editor: &Editor) -> Pixels {
-    px(editor.config.editor.effective_font_size() * 1.8)
+    px(editor.config.editor.effective_font_size() * editor.config.editor.effective_line_height())
 }
 
 /// `c` with its alpha scaled by `alpha`.

@@ -17,6 +17,8 @@ pub struct EditorConfig {
     pub vim_mode: bool,
     pub font_family: String,
     pub font_size: f32,
+    /// Line height as a multiple of the font size (default 1.6; clamped to 1.2–2.4).
+    pub line_height: f32,
     /// Theme preset name: "midnight", "paper", "sepia" or "black" (case-insensitive).
     pub theme: String,
     /// Sentences with more words than this are marked by the Lab's long-sentence check.
@@ -24,6 +26,15 @@ pub struct EditorConfig {
 }
 
 impl EditorConfig {
+    /// The configured line-height multiple, clamped to 1.2–2.4 (the default 1.6 if it isn't a finite number).
+    pub fn effective_line_height(&self) -> f32 {
+        if self.line_height.is_finite() {
+            self.line_height.clamp(1.2, 2.4)
+        } else {
+            1.6
+        }
+    }
+
     /// The configured font size, clamped to 8–72 (the default 18 if it isn't a finite number).
     pub fn effective_font_size(&self) -> f32 {
         if self.font_size.is_finite() {
@@ -40,6 +51,7 @@ impl Default for EditorConfig {
             vim_mode: false,
             font_family: "IBM Plex Mono".into(),
             font_size: 18.0,
+            line_height: 1.6,
             theme: "midnight".into(),
             long_sentence_words: 30,
         }
@@ -125,6 +137,22 @@ mod tests {
         assert_eq!(size(500.0), 72.0);
         assert_eq!(size(f32::NAN), 18.0);
         assert_eq!(size(f32::INFINITY), 18.0);
+    }
+
+    #[test]
+    fn effective_line_height_is_clamped_and_finite() {
+        let lh = |line_height| {
+            EditorConfig {
+                line_height,
+                ..EditorConfig::default()
+            }
+            .effective_line_height()
+        };
+        assert_eq!(lh(1.6), 1.6);
+        assert_eq!(lh(0.5), 1.2);
+        assert_eq!(lh(9.0), 2.4);
+        assert_eq!(lh(f32::NAN), 1.6);
+        assert_eq!(EditorConfig::default().line_height, 1.6);
     }
 
     #[test]
