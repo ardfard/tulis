@@ -16,6 +16,8 @@ use crate::editor::{Editor, Scope};
 use crate::workspace::Workspace;
 
 pub const SIDEBAR_WIDTH: f32 = 240.;
+/// Shown under the sidebar's text field so the list keys are discoverable.
+pub const KEY_HINT: &str = "j/k preview · ↵ keep · ⌫ remove · esc close";
 
 pub struct AltSidebar {
     editor: Entity<Editor>,
@@ -209,7 +211,8 @@ impl Render for AltSidebar {
                     .on_action(cx.listener(Self::keep))
                     .on_action(cx.listener(Self::remove))
                     .on_action(cx.listener(Self::focus_input))
-                    .flex_1()
+                    .flex_initial()
+                    .min_h(px(0.))
                     .overflow_y_scroll()
                     .p_2()
                     .flex()
@@ -258,6 +261,14 @@ impl Render for AltSidebar {
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.ask_ai(&AiAlternates, window, cx)
                     })),
+            )
+            .child(
+                div()
+                    .px_3()
+                    .pb_3()
+                    .text_xs()
+                    .text_color(t.text_muted)
+                    .child(KEY_HINT),
             )
             .into_any_element()
     }
