@@ -173,7 +173,8 @@ impl Render for AltSidebar {
             .children(Scope::ALL.map(|scope| {
                 Tab::new().child(
                     div()
-                        .italic()
+                        .font_family(crate::theme::SCRIPT_FONT)
+                        .text_size(px(crate::theme::SCRIPT_SIZE))
                         .text_color(t.accent)
                         .child(Self::tab_label(scope, session.selection)),
                 )

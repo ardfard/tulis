@@ -29,6 +29,7 @@ fn main() {
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
             gpui_component::init(cx);
+            theme::register_fonts(cx);
             let (config, warning) = Config::load(Config::default_path().as_deref());
             keymap::bind(cx);
             let bounds = Bounds::centered(None, size(px(1100.), px(820.)), cx);

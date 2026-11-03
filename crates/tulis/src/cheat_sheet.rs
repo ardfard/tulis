@@ -81,7 +81,13 @@ impl Render for CheatSheet {
                             .flex()
                             .flex_col()
                             .gap_1()
-                            .child(div().italic().text_color(t.accent).child(group.label()))
+                            .child(
+                                div()
+                                    .font_family(crate::theme::SCRIPT_FONT)
+                                    .text_size(px(crate::theme::SCRIPT_SIZE))
+                                    .text_color(t.accent)
+                                    .child(group.label()),
+                            )
                             .children(rows.into_iter().map(|row| {
                                 div()
                                     .id(row.id)

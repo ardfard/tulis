@@ -152,7 +152,8 @@ impl Render for LabPanel {
                     .child(
                         div()
                             .flex_1()
-                            .italic()
+                            .font_family(crate::theme::SCRIPT_FONT)
+                            .text_size(px(crate::theme::SCRIPT_SIZE))
                             .text_color(t.accent)
                             .child("The Lab guide…"),
                     )

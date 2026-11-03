@@ -170,6 +170,24 @@ pub fn theme_from_config(name: &str) -> (ThemeId, Option<String>) {
 /// Monospace families tried, in order, after the configured one.
 pub const FONT_FALLBACKS: [&str; 2] = ["IBM Plex Mono", "JetBrains Mono"];
 
+/// The handwriting face for small labels (sidebar tabs, Overflow title, Lab guide, cheat-sheet groups).
+/// Bundled, so it looks the same on every machine. Caveat is licensed under the SIL OFL (see
+/// `assets/fonts/OFL-Caveat.txt`).
+pub const SCRIPT_FONT: &str = "Caveat";
+/// Caveat runs small for its point size; labels using it are set a little larger.
+pub const SCRIPT_SIZE: f32 = 21.0;
+const CAVEAT_TTF: &[u8] = include_bytes!("../assets/fonts/Caveat.ttf");
+
+/// Register the bundled fonts with the text system. Call once at startup, before the first window.
+pub fn register_fonts(cx: &mut App) {
+    if let Err(error) = cx
+        .text_system()
+        .add_fonts(vec![std::borrow::Cow::Borrowed(CAVEAT_TTF)])
+    {
+        eprintln!("could not register the bundled Caveat font: {error}");
+    }
+}
+
 /// The platform's monospace font, used when no preferred family is installed.
 pub fn platform_mono(cx: &App) -> String {
     if cx.has_global::<gpui_component::Theme>() {
@@ -256,6 +274,17 @@ pub fn apply_to_components(theme: &Theme, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_bundled_script_font_is_a_caveat_truetype_file() {
+        assert_eq!(
+            &super::CAVEAT_TTF[..4],
+            &[0, 1, 0, 0],
+            "not a TrueType file"
+        );
+        assert!(super::CAVEAT_TTF.windows(6).any(|w| w == b"Caveat"));
+        assert_eq!(super::SCRIPT_FONT, "Caveat");
+    }
+
     use super::*;
 
     #[test]

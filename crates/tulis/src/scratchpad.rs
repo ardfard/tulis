@@ -335,7 +335,8 @@ impl Render for Scratchpad {
                     .px_3()
                     .pt_2()
                     .pb_1()
-                    .italic()
+                    .font_family(crate::theme::SCRIPT_FONT)
+                    .text_size(px(crate::theme::SCRIPT_SIZE))
                     .text_color(t.accent)
                     .child("Overflow"),
             )
