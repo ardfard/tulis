@@ -127,6 +127,12 @@ pub struct Editor {
     pub(crate) swap: Option<swap::Swap>,
     /// The version bar (or dots) under the pointer, tinting its paragraph.
     pub(crate) version_hover: Option<swap::VersionHover>,
+    /// The paragraphs a Lab run is reading, and when it started (the scan line).
+    pub(crate) lab_scan: Option<(Vec<ParaId>, std::time::Instant)>,
+    /// Repaints the scan line one step at a time.
+    lab_scan_ticker: Option<Task<()>>,
+    /// When the last Lab results landed: cuts and marks fade in from then.
+    pub(crate) lab_arrived: Option<std::time::Instant>,
     /// IME marked text, as a byte range of `doc.flat_text()`.
     pub(crate) marked: Option<Range<usize>>,
     pub(crate) goal_x: Option<Pixels>,
@@ -181,6 +187,9 @@ impl Editor {
             cycled: None,
             swap: None,
             version_hover: None,
+            lab_scan: None,
+            lab_scan_ticker: None,
+            lab_arrived: None,
             alt_session: None,
             ai_task: None,
             ai_cancel: None,

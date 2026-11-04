@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use gpui::{Context, Window, prelude::*};
 use tulis_core::ai::prompts::MarkKind;
@@ -17,6 +18,7 @@ use tulis_core::{AiKind, DocPos, ParaId, Paragraph, Selection, Source};
 use super::{Editor, EditorEvent};
 use crate::actions::{NextMark, PrevMark};
 use crate::commands;
+use crate::motion;
 
 /// The Lab bar's cached counts, with the state they were computed from: (edit revision,
 /// preview revision, level, cut count) and (words before, words after).
@@ -453,6 +455,7 @@ impl Editor {
         self.stop_ai();
         let cancel = Arc::new(AtomicBool::new(false));
         self.ai_cancel = Some(cancel.clone());
+        self.start_lab_scan(jobs.iter().map(|job| job.para_id).collect(), cx);
         let total = jobs.len();
         let flag = cancel.clone();
         let work = cx.background_spawn(async move {
@@ -471,8 +474,12 @@ impl Editor {
             this.update(cx, |editor, cx| {
                 editor.ai_task = None;
                 editor.ai_cancel = None;
+                editor.lab_scan = None;
                 if !cancel.load(Ordering::SeqCst) {
                     apply(editor, results, total, cx);
+                    if !cx.reduce_motion() {
+                        editor.lab_arrived = Some(Instant::now());
+                    }
                 }
                 cx.emit(EditorEvent::LabDone);
                 cx.notify();
@@ -480,6 +487,29 @@ impl Editor {
             .ok();
         }));
         self.set_notice(working, cx);
+    }
+
+    /// Show the scan line over `scope` until the run ends, stepping every `motion::FAST`.
+    fn start_lab_scan(&mut self, scope: Vec<ParaId>, cx: &mut Context<Self>) {
+        self.lab_scan = Some((scope, Instant::now()));
+        self.lab_scan_ticker = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(motion::FAST).await;
+                let running = this
+                    .update(cx, |editor, cx| {
+                        let running = editor.lab_running() && editor.lab_scan.is_some();
+                        if !running {
+                            editor.lab_scan = None;
+                        }
+                        cx.notify();
+                        running
+                    })
+                    .unwrap_or(false);
+                if !running {
+                    break;
+                }
+            }
+        }));
     }
 
     /// What the shared AI task slot is running, if anything. Only Lab runs have a cancel flag.
@@ -501,6 +531,8 @@ impl Editor {
             flag.store(true, Ordering::SeqCst);
         }
         self.ai_task = None;
+        self.lab_scan = None;
+        self.lab_scan_ticker = None;
         kind
     }
 

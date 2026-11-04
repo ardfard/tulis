@@ -7,11 +7,12 @@ use gpui::{
     size,
 };
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::Editor;
 use super::layout::{LayoutCache, ParaLayout, clamp_px};
 use super::markers::{self, DOT};
+use crate::motion;
 use crate::runs::{RunStyle, build_runs};
 use tulis_core::ParaId;
 use tulis_core::stats::title_marker_len;
@@ -32,6 +33,7 @@ pub struct EditorPrepaint {
     markers: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
     swap: SwapPaint,
+    scan: Vec<PaintQuad>,
 }
 
 impl IntoElement for EditorElement {
@@ -72,12 +74,14 @@ fn faded(mut c: gpui::Hsla, alpha: f32) -> gpui::Hsla {
 pub(crate) fn run_style(editor: &Editor, alpha: f32) -> RunStyle {
     let mut title_font = font(editor.font_family.clone());
     title_font.weight = FontWeight::BOLD;
+    // Lab results that just landed fade in: cuts toward their alpha, marks' tint from nothing.
+    let arrived = lab_arrival(editor, Instant::now());
     RunStyle {
         font: font(editor.font_family.clone()),
         title_font,
         color: faded(editor.theme.text, alpha),
-        fade_alpha: editor.theme.fade_alpha,
-        mark_tint: faded(editor.theme.mark_tint, alpha),
+        fade_alpha: 1. - (1. - editor.theme.fade_alpha) * arrived,
+        mark_tint: faded(editor.theme.mark_tint, alpha * arrived),
         marker: faded(editor.theme.text_muted, 0.5 * alpha),
         ghost_alpha: editor.theme.ghost_alpha,
     }
@@ -156,6 +160,51 @@ pub(super) fn build_layout(
         version_dots: Vec::new(),
         version_zones: Vec::new(),
     }
+}
+
+/// How far Lab results that just landed have faded in (1 when there is nothing to fade).
+fn lab_arrival(editor: &Editor, now: Instant) -> f32 {
+    editor.lab_arrived.map_or(1., |start| {
+        motion::ease_out(motion::progress(start, Duration::ZERO, motion::BASE, now))
+    })
+}
+
+/// The scan line of a Lab run: a thin line in the AI color through one line of the scope at a
+/// time, top to bottom, one step every `motion::FAST`, looping. With reduced motion the scope
+/// gets a still tint instead.
+fn scan_quads(editor: &Editor, layout: &LayoutCache, reduce_motion: bool) -> Vec<PaintQuad> {
+    let Some((scope, start)) = editor.lab_scan.as_ref().filter(|_| editor.lab_running()) else {
+        return Vec::new();
+    };
+    let lh = layout.line_height;
+    let left = layout.origin.x;
+    let lines: Vec<(&ParaLayout, usize)> = scope
+        .iter()
+        .filter_map(|id| layout.paras.get(editor.doc.para_index(*id)?))
+        .flat_map(|pl| (0..pl.line_count()).map(move |k| (pl, k)))
+        .collect();
+    if reduce_motion {
+        return lines
+            .iter()
+            .filter(|(_, k)| *k == 0)
+            .map(|(pl, _)| {
+                let top = layout.origin.y + pl.top;
+                let bounds = Bounds::new(point(left, top), size(layout.width, pl.height(lh)));
+                fill(bounds, faded(editor.theme.ai_accent, 0.08))
+            })
+            .collect();
+    }
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    let step = (start.elapsed().as_millis() / motion::FAST.as_millis()) as usize % lines.len();
+    let (pl, k) = lines[step];
+    let (a, b) = pl.line_range(k);
+    let x0 = left + pl.x_in_line(k, a).max(px(0.));
+    let x1 = (left + pl.x_in_line(k, b)).max(x0 + lh);
+    let y = layout.origin.y + pl.top + lh * k as f32 + lh / 2.;
+    let line = Bounds::new(point(x0, y - px(0.75)), size(x1 - x0, px(1.5)));
+    vec![fill(line, faded(editor.theme.ai_accent, 0.9))]
 }
 
 /// The text alpha of paragraph `id` during a version swap (1 otherwise).
@@ -473,6 +522,8 @@ impl Element for EditorElement {
             fill(Bounds::new(caret, size(width, lh)), color)
         });
         let swap = swap_paint(editor, &layout, window);
+        let animating = swap.animating || lab_arrival(editor, Instant::now()) < 1.;
+        let scan = scan_quads(editor, &layout, cx.reduce_motion());
         let wants_autoscroll = editor.autoscroll;
         let caret = layout.window_point(editor.selection.head);
         let scroll = editor.scroll.clone();
@@ -485,7 +536,7 @@ impl Element for EditorElement {
             self.editor
                 .update(cx, |editor, _| editor.autoscroll = false);
         }
-        if swap.animating {
+        if animating {
             window.request_animation_frame();
         }
         Some(EditorPrepaint {
@@ -494,6 +545,7 @@ impl Element for EditorElement {
             markers,
             cursor,
             swap,
+            scan,
         })
     }
 
@@ -535,6 +587,9 @@ impl Element for EditorElement {
             });
         }
         for quad in prepaint.markers {
+            window.paint_quad(quad);
+        }
+        for quad in prepaint.scan {
             window.paint_quad(quad);
         }
         if focus_handle.is_focused(window) {

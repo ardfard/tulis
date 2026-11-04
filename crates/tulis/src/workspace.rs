@@ -76,9 +76,17 @@ impl Workspace {
                         EditorEvent::Loaded => ws.document_loaded(window, cx),
                     }
                 }),
-                cx.subscribe(&lab, |ws, _, event: &LabEvent, cx| match event {
-                    LabEvent::Close => ws.close_lab(cx),
-                }),
+                cx.subscribe_in(
+                    &lab,
+                    window,
+                    |ws, _, event: &LabEvent, window, cx| match event {
+                        LabEvent::Chosen => {
+                            ws.lab_open = false;
+                            window.focus(&ws.main_focus(cx), cx);
+                            cx.notify();
+                        }
+                    },
+                ),
             ];
         let initial_theme = editor.read(cx).theme;
         theme::apply_to_components(&initial_theme, cx);
@@ -1540,7 +1548,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn closing_the_lab_while_it_works_stops_the_remaining_requests(cx: &mut TestAppContext) {
+    fn escape_on_the_page_stops_a_lab_run_and_its_remaining_requests(cx: &mut TestAppContext) {
         let (ws, cx) = root_workspace(cx, &["One really.", "Two really."]);
         let mock = lab_mock(&ws, cx, &[r#"["really"]"#, r#"["really"]"#]);
         cx.simulate_keystrokes("secondary-l");
@@ -1552,22 +1560,26 @@ mod tests {
                 cx,
             )
         });
-        // It stays open while the AI works.
-        assert!(lab_open(&ws, cx));
-        assert!(ws.read_with(cx, |ws, cx| ws.editor.read(cx).lab_running()));
-        ws.update(cx, |ws, cx| ws.close_lab(cx));
+        // The popover closes; the scan line shows the run on the page.
+        assert!(!lab_open(&ws, cx));
+        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
+        editor.read_with(cx, |e, _| {
+            assert!(e.lab_running());
+            assert!(e.lab_scan.is_some());
+        });
+        cx.simulate_keystrokes("escape");
         cx.run_until_parked();
         assert!(mock.requests.lock().unwrap().len() < 2);
-        let editor = ws.read_with(cx, |ws, _| ws.editor.clone());
         editor.read_with(cx, |e, _| {
             assert!(e.trim_preview.is_none());
             assert!(!e.lab_running());
-            assert_eq!(e.last_notice(), Some("Lab stopped"));
+            assert!(e.lab_scan.is_none());
+            assert_eq!(e.last_notice(), Some("AI request cancelled"));
         });
     }
 
     #[gpui::test]
-    fn another_ai_request_or_a_load_closes_the_lab_while_it_works(cx: &mut TestAppContext) {
+    fn another_ai_request_or_a_load_stops_a_lab_run(cx: &mut TestAppContext) {
         let (ws, cx) = root_workspace(cx, &["One really.", "Two really."]);
         lab_mock(&ws, cx, &[r#"["really"]"#, r#"["really"]"#, r#"["Uno"]"#]);
         let lab = ws.read_with(cx, |ws, _| ws.lab.clone());
@@ -1581,7 +1593,8 @@ mod tests {
                     cx,
                 )
             });
-            assert!(lab_open(&ws, cx));
+            assert!(!lab_open(&ws, cx));
+            assert!(editor.read_with(cx, |e, _| e.lab_running()));
         };
         start_trim(cx);
         editor.update(cx, |e, cx| {
@@ -1592,17 +1605,17 @@ mod tests {
             e.ask_ai_alternates(cx);
         });
         cx.run_until_parked();
-        assert!(!lab_open(&ws, cx));
+        assert!(editor.read_with(cx, |e, _| e.trim_preview.is_none()));
         start_trim(cx);
         editor.update(cx, |e, cx| {
             e.load(tulis_core::Document::from_texts(&["Fresh."]), cx)
         });
         cx.run_until_parked();
-        assert!(!lab_open(&ws, cx));
+        assert!(editor.read_with(cx, |e, _| !e.lab_running() && e.trim_preview.is_none()));
     }
 
     #[gpui::test]
-    fn a_cached_trim_chosen_while_a_check_runs_closes_the_lab_and_stays(cx: &mut TestAppContext) {
+    fn a_cached_trim_chosen_while_a_check_runs_replaces_it(cx: &mut TestAppContext) {
         let (ws, cx) = root_workspace(cx, &["I really love tea."]);
         lab_mock(
             &ws,
@@ -1626,7 +1639,8 @@ mod tests {
             cx,
             crate::lab_popover::LabItem::Check(crate::editor::Check::Hedges),
         );
-        assert!(lab_open(&ws, cx));
+        assert!(!lab_open(&ws, cx));
+        assert!(editor.read_with(cx, |e, _| e.lab_running()));
         run(cx, slight);
         assert!(!lab_open(&ws, cx));
         cx.run_until_parked();

@@ -35,9 +35,10 @@ impl LabItem {
     }
 }
 
-/// The popover asks the workspace to close it.
+/// A choice was made: the workspace closes the popover and leaves the run going (the scan
+/// line on the page shows it).
 pub enum LabEvent {
-    Close,
+    Chosen,
 }
 
 pub struct LabPanel {
@@ -97,17 +98,15 @@ impl LabPanel {
         }
     }
 
-    /// Run `item` on the scope. The popover closes now, or when the AI is done (closing it
-    /// before then stops the run).
+    /// Run `item` on the scope and close the popover. While the AI works, a scan line on the
+    /// page shows it (Esc stops it).
     pub(crate) fn run(&mut self, item: LabItem, cx: &mut Context<Self>) {
         let scope = self.scope.clone();
         self.editor.update(cx, |e, cx| match item {
             LabItem::Check(check) => e.run_check(check, &scope, cx),
             LabItem::Trim(level) => e.run_trim(level, &scope, cx),
         });
-        if !self.editor.read(cx).lab_running() {
-            cx.emit(LabEvent::Close);
-        }
+        cx.emit(LabEvent::Chosen);
     }
 }
 
@@ -115,7 +114,6 @@ impl Render for LabPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let editor = self.editor.read(cx);
         let t = editor.theme;
-        let running = editor.lab_running();
         let highlight = self.highlight;
         let explain = self.explain;
         let items = LabItem::all();
@@ -225,14 +223,6 @@ impl Render for LabPanel {
                             }))
                     })),
             )
-            .when(running, |d| {
-                d.child(
-                    div()
-                        .text_xs()
-                        .text_color(t.text_muted)
-                        .child("Working… Esc stops"),
-                )
-            })
     }
 }
 

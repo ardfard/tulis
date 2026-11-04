@@ -81,7 +81,7 @@ impl Editor {
 
     /// A key was pressed: every running animation jumps to its end state.
     pub(crate) fn settle_motion(&mut self, cx: &mut Context<Self>) {
-        if self.swap.take().is_some() {
+        if self.swap.take().is_some() | self.lab_arrived.take().is_some() {
             cx.notify();
         }
     }
