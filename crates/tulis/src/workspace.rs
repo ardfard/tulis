@@ -18,7 +18,7 @@ use crate::actions::{
     AiAlternates, CycleTheme, LabDocument, LabParagraph, New, Open, OpenAlternates, OpenLab, Quit,
     Save, SaveAs, SendToOverflow, ToggleGhost, ToggleMarkers, ToggleOverflowPanel, TogglePreview,
 };
-use crate::editor::{Editor, EditorEvent, GUTTER};
+use crate::editor::{Editor, EditorEvent, GUTTER, markers};
 use crate::header_dim::HeaderDim;
 use crate::lab_popover::{LabEvent, LabPanel};
 use crate::scratchpad::OverflowDrag;
@@ -341,6 +341,73 @@ impl Workspace {
         }
     }
 
+    /// The paragraph map: one tick per paragraph in the right margin, shown only when the
+    /// document is taller than the page. The caret's paragraph is accent, the title muted.
+    fn render_paragraph_map(&self, cx: &App) -> Option<impl IntoElement + use<>> {
+        let editor = self.editor.read(cx);
+        let viewport = editor.scroll.bounds();
+        if editor.scroll.max_offset().y <= px(0.) || viewport.size.height <= px(0.) {
+            return None;
+        }
+        let t = editor.theme;
+        let lens: Vec<usize> = editor
+            .doc
+            .paragraphs
+            .iter()
+            .map(|p| p.text().chars().count())
+            .collect();
+        let max_height = f32::from(viewport.size.height) - 2. * COLUMN_PADDING_Y;
+        let (pitch, widths) = markers::map_ticks(&lens, max_height);
+        let caret = editor.selection.head.para;
+        let has_title = editor
+            .doc
+            .paragraphs
+            .first()
+            .is_some_and(|p| tulis_core::stats::title_marker_len(&p.text()) > 0);
+        let jump_editor = self.editor.clone();
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right(px(markers::MAP_RIGHT))
+                .w(px(markers::MAP_WIDTH))
+                .flex()
+                .flex_col()
+                .justify_center()
+                .child(
+                    div()
+                        .id("paragraph-map")
+                        .debug_selector(|| "paragraph-map".into())
+                        .flex()
+                        .flex_col()
+                        .children(widths.into_iter().enumerate().map(|(ix, width)| {
+                            let color = if ix == caret {
+                                t.accent
+                            } else if ix == 0 && has_title {
+                                t.text_muted
+                            } else {
+                                t.rule
+                            };
+                            let jump_editor = jump_editor.clone();
+                            div()
+                                .id(("map-tick", ix))
+                                .debug_selector(move || format!("map-tick-{ix}"))
+                                .h(px(pitch))
+                                .flex()
+                                .justify_end()
+                                .items_center()
+                                .cursor_pointer()
+                                .child(div().w(px(width)).h(px(markers::TICK_HEIGHT)).bg(color))
+                                .on_click(move |_, window, cx| {
+                                    jump_editor.update(cx, |e, cx| e.jump_to_paragraph(ix, cx));
+                                    window.focus(&jump_editor.focus_handle(cx), cx);
+                                })
+                        })),
+                ),
+        )
+    }
+
     /// The scrollable page: a centered column with fades over its top and bottom edges.
     fn render_page(&self, cx: &App) -> impl IntoElement {
         let editor = self.editor.read(cx);
@@ -377,6 +444,7 @@ impl Workspace {
             )
             .child(edge_fade(true, background))
             .child(edge_fade(false, background))
+            .children(self.render_paragraph_map(cx))
             // A scratchpad block dragged by its grip; Ctrl held copies it.
             .on_drop(move |drag: &OverflowDrag, window, cx| {
                 let (at, copy) = (window.mouse_position(), window.modifiers().secondary(cx));
@@ -1636,6 +1704,33 @@ mod tests {
         });
         draw(cx);
         assert!(lab_open(&ws, cx));
+    }
+
+    #[gpui::test]
+    fn long_documents_get_a_paragraph_map_whose_ticks_jump(cx: &mut TestAppContext) {
+        let texts: Vec<String> = (0..40).map(|i| format!("Paragraph {i}.")).collect();
+        let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let (ws, cx) = root_workspace(cx, &texts);
+        cx.simulate_resize(gpui::size(gpui::px(900.), gpui::px(600.)));
+        draw(cx);
+        draw(cx);
+        assert!(cx.debug_bounds("paragraph-map").is_some());
+        let tick = cx
+            .debug_bounds("map-tick-30")
+            .expect("a tick per paragraph");
+        cx.simulate_click(tick.center(), gpui::Modifiers::none());
+        draw(cx);
+        let head = ws.read_with(cx, |ws, cx| ws.editor.read(cx).selection.head);
+        assert_eq!(head, DocPos::new(30, 0));
+    }
+
+    #[gpui::test]
+    fn short_documents_have_no_paragraph_map(cx: &mut TestAppContext) {
+        let (_, cx) = root_workspace(cx, &["One.", "Two."]);
+        cx.simulate_resize(gpui::size(gpui::px(900.), gpui::px(600.)));
+        draw(cx);
+        draw(cx);
+        assert!(cx.debug_bounds("paragraph-map").is_none());
     }
 
     #[gpui::test]

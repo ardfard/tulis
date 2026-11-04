@@ -10,7 +10,7 @@ mod lab;
 #[cfg(test)]
 mod lab_tests;
 pub mod layout;
-mod markers;
+pub(crate) mod markers;
 #[cfg(test)]
 pub(crate) mod tests;
 mod vim_exec;
@@ -413,6 +413,13 @@ impl Editor {
         self.history.break_coalescing();
         self.autoscroll = true;
         cx.notify();
+    }
+
+    /// Put the caret at the start of paragraph `para` and scroll to it (a paragraph-map tick).
+    pub fn jump_to_paragraph(&mut self, para: usize, cx: &mut Context<Self>) {
+        if para < self.doc.paragraphs.len() {
+            self.set_selection(Selection::caret(DocPos::new(para, 0)), cx);
+        }
     }
 
     /// Whether `pos` lies in the cycled group (edges included). False when there is none.

@@ -21,6 +21,32 @@ pub const DOTS_GAP: f32 = 5.;
 /// Width of a version dot's clickable area, centered on the dot.
 pub const DOT_HIT_WIDTH: f32 = 14.;
 
+/// The paragraph map in the right margin of long documents: its width and distance from the
+/// page's right edge, and its ticks' height and spacing.
+pub const MAP_WIDTH: f32 = 24.;
+pub const MAP_RIGHT: f32 = 24.;
+pub const TICK_HEIGHT: f32 = 2.;
+pub const TICK_PITCH: f32 = 9.;
+/// The shortest a tick is drawn, however short its paragraph.
+pub const TICK_MIN_WIDTH: f32 = 4.;
+
+/// The map's tick pitch (squeezed so `count` ticks fit `max_height`) and each tick's width,
+/// scaled to its paragraph's length (`lens`, in characters) against the longest.
+pub fn map_ticks(lens: &[usize], max_height: f32) -> (f32, Vec<f32>) {
+    let count = lens.len().max(1) as f32;
+    let pitch = TICK_PITCH.min(max_height / count).max(TICK_HEIGHT);
+    let longest = lens.iter().copied().max().unwrap_or(0).max(1) as f32;
+    let widths = lens
+        .iter()
+        .map(|&len| {
+            (MAP_WIDTH * len as f32 / longest)
+                .round()
+                .max(TICK_MIN_WIDTH)
+        })
+        .collect();
+    (pitch, widths)
+}
+
 /// Split `range` of a paragraph into its pieces on each visual line, as `(line, start..end)`.
 /// `line_starts` is `ParaLayout::line_starts`; `len` is the paragraph's byte length.
 pub fn split_by_lines(
@@ -187,6 +213,18 @@ mod tests {
         assert_eq!(version_dot_at(&hits, bounds[2].center()), Some((4, 2)));
         assert_eq!(version_dot_at(&hits, bounds[0].center()), Some((4, 0)));
         assert_eq!(version_dot_at(&hits, point(px(200.), px(60.))), None);
+    }
+
+    #[test]
+    fn map_ticks_scale_to_the_longest_paragraph_and_squeeze_to_fit() {
+        let (pitch, widths) = map_ticks(&[10, 40, 1, 0], 600.);
+        assert_eq!(pitch, TICK_PITCH);
+        assert_eq!(widths, vec![6., 24., 4., 4.]);
+        let (pitch, _) = map_ticks(&[5; 200], 600.);
+        assert_eq!(pitch, 3.);
+        let (pitch, _) = map_ticks(&[5; 2000], 600.);
+        assert_eq!(pitch, TICK_HEIGHT);
+        assert_eq!(map_ticks(&[], 600.).1, Vec::<f32>::new());
     }
 
     #[test]
