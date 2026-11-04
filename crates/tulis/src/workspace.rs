@@ -39,6 +39,8 @@ pub struct Workspace {
     /// The Lab popover's contents, and whether it is open.
     pub(crate) lab: Entity<LabPanel>,
     pub(crate) lab_open: bool,
+    /// The footer's Share menu is open.
+    pub(crate) share_open: bool,
     pub(crate) header_dim: HeaderDim,
     /// Repaints the header when its auto-dim state is due to change.
     pub(crate) dim_timer: Option<Task<()>>,
@@ -92,6 +94,7 @@ impl Workspace {
             preview_focus: cx.focus_handle(),
             lab,
             lab_open: false,
+            share_open: false,
             header_dim: HeaderDim::default(),
             dim_timer: None,
             window_title: String::new(),
@@ -1567,6 +1570,37 @@ mod tests {
         });
         draw(cx);
         assert!(lab_open(&ws, cx));
+    }
+
+    #[gpui::test]
+    fn share_opens_a_menu_whose_buttons_share_and_close_it(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["One."]);
+        draw(cx);
+        assert!(cx.debug_bounds("share-x").is_none());
+        let share = cx.debug_bounds("share-button").expect("the Share button");
+        cx.simulate_click(share.center(), gpui::Modifiers::none());
+        draw(cx);
+        assert!(ws.read_with(cx, |ws, _| ws.share_open));
+        let x = cx.debug_bounds("share-x").expect("the X button");
+        assert!(cx.debug_bounds("share-linkedin").is_some());
+        cx.simulate_click(x.center(), gpui::Modifiers::none());
+        draw(cx);
+        assert!(!ws.read_with(cx, |ws, _| ws.share_open));
+        assert!(cx.debug_bounds("share-x").is_none());
+        assert!(cx.opened_url().is_some_and(|url| url.contains("x.com")));
+    }
+
+    #[gpui::test]
+    fn the_overflow_button_counts_stashed_blocks(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["One.", "Two."]);
+        draw(cx);
+        assert!(cx.debug_bounds("stash-count").is_none());
+        ws.update(cx, |ws, cx| {
+            ws.editor
+                .update(cx, |e, cx| e.set_overflow("first\n\nsecond", cx))
+        });
+        draw(cx);
+        assert!(cx.debug_bounds("stash-count").is_some());
     }
 
     fn sidebar_focused(ws: &gpui::Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> bool {

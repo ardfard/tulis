@@ -2,14 +2,17 @@
 //! paragraphs (the selection's, the cursor's or the whole document's).
 
 use gpui::{
-    App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Hsla, IntoElement, ParentElement,
-    Render, RenderOnce, Styled, Subscription, Window, div, prelude::*, px,
+    App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, FontWeight, IntoElement,
+    ParentElement, Render, RenderOnce, Styled, Subscription, Window, div, prelude::*, px,
 };
 use gpui_component::Selectable;
 use tulis_core::ParaId;
 
 use crate::actions::{LabChoose, LabNext, LabPrev};
+use crate::chrome::icon;
+use crate::commands;
 use crate::editor::{Check, Editor, TrimLevel};
+use crate::theme::Theme;
 
 pub const LAB_WIDTH: f32 = 340.;
 
@@ -233,12 +236,11 @@ impl Render for LabPanel {
     }
 }
 
-/// The footer's dashed LAB button: the Lab popover's trigger.
+/// The footer's dashed Lab button, with its key: the Lab popover's trigger.
 #[derive(IntoElement)]
 pub struct LabButton {
     pub open: bool,
-    pub accent: Hsla,
-    pub hover: Hsla,
+    pub theme: Theme,
 }
 
 impl Selectable for LabButton {
@@ -254,19 +256,40 @@ impl Selectable for LabButton {
 
 impl RenderOnce for LabButton {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let t = self.theme;
         div()
             .id("lab")
             .debug_selector(|| "lab-button".into())
-            .px_3()
-            .py_0p5()
-            .rounded_md()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.))
+            .pl(px(12.))
+            .pr(px(10.))
+            .py(px(6.))
+            .rounded(px(8.))
             .border_1()
             .border_dashed()
-            .border_color(self.accent)
-            .text_color(self.accent)
+            .border_color(t.accent)
+            .text_color(t.accent)
             .cursor_pointer()
-            .when(self.open, |d| d.bg(self.hover))
-            .hover(|d| d.bg(self.hover))
-            .child("LAB")
+            .when(self.open, |d| d.bg(t.selection))
+            .when(!self.open, |d| d.hover(|d| d.bg(t.panel)))
+            .child(icon(gpui_kit_assets::IconName::FlaskConical, 14., t.accent))
+            .child(div().font_weight(FontWeight::MEDIUM).child("Lab"))
+            .children(commands::command_keys("open_lab").map(|keys| key_pill(keys, &t)))
     }
+}
+
+/// A key drawn as a small pill: `Ctrl L`.
+pub(crate) fn key_pill(keys: &str, t: &Theme) -> impl IntoElement {
+    div()
+        .px(px(5.))
+        .py(px(1.))
+        .rounded(px(4.))
+        .bg(t.selection)
+        .text_size(px(11.))
+        .line_height(px(14.))
+        .text_color(t.accent)
+        .child(commands::key_pill(keys))
 }

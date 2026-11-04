@@ -4,12 +4,13 @@ use std::time::Instant;
 
 use gpui::{
     Anchor, Animation, AnimationExt, AnyView, App, ClickEvent, ClipboardItem, Context, Div,
-    FontWeight, Hsla, IntoElement, ParentElement, Stateful, Styled, Window, div, prelude::*, px,
+    FontWeight, Hsla, IntoElement, ParentElement, RenderOnce, Stateful, Styled, Window, div,
+    prelude::*, px,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::popover::Popover;
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{Icon, IconName, Sizable};
+use gpui_component::{Icon, IconName, Selectable, Sizable};
 use tulis_core::alternates::AltLevel;
 use tulis_core::share::{self, ShareTarget};
 use tulis_core::stats;
@@ -19,6 +20,7 @@ use crate::actions::{
     Open, OpenLab, Save, ShareLinkedIn, ShareX, ShowCheatSheet, ToggleMarkers, ToggleOverflowPanel,
     TogglePreview,
 };
+use crate::assets;
 use crate::commands;
 use crate::lab_popover::LabButton;
 use crate::theme::Theme;
@@ -26,7 +28,7 @@ use crate::toast::TOAST_FADE;
 use crate::workspace::{Workspace, file_name};
 
 pub const HEADER_HEIGHT: f32 = 44.;
-pub const FOOTER_HEIGHT: f32 = 44.;
+pub const FOOTER_HEIGHT: f32 = 48.;
 
 pub(crate) fn mode_label(mode: Mode) -> &'static str {
     match mode {
@@ -416,58 +418,120 @@ impl Workspace {
         )
     }
 
-    /// Save/Open/Share on the left, LAB in the middle, XYZ (Overflow) on the right.
+    /// Save, Open and Share ▾ on the left, the Lab button in the middle, Overflow (with the
+    /// stash count) on the right.
     pub(crate) fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = self.editor.read(cx).theme;
+        let editor = self.editor.read(cx);
+        let t = editor.theme;
+        let dirty = editor.dirty;
+        let stashed = editor.doc.overflow_blocks().len();
         let overflow_open = self.show_overflow;
-        let icon_button = |id: &'static str, tooltip: &'static str| {
-            Button::new(id).ghost().xsmall().tooltip(tooltip)
+        let icon_button = |id: &'static str, tooltip: String| {
+            div()
+                .id(id)
+                .size(px(30.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(6.))
+                .cursor_pointer()
+                .hover(|d| d.bg(t.panel))
+                .tooltip(tooltip_text(tooltip))
         };
+        let workspace = cx.entity();
         div()
             .id("footer")
             .h(px(FOOTER_HEIGHT))
             .flex_none()
-            .px_4()
+            .px(px(20.))
             .flex()
             .flex_row()
             .items_center()
-            .text_xs()
+            .text_size(px(13.))
             .child(
                 div()
                     .flex_1()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap_1()
+                    .gap(px(2.))
                     .child(
-                        icon_button("save", "Save (Ctrl+S)")
-                            .icon(gpui_kit_assets::IconName::Save)
+                        icon_button("save", commands::tooltip("Save", "save"))
+                            .child(icon(
+                                gpui_kit_assets::IconName::Save,
+                                16.,
+                                if dirty { t.accent } else { t.text_muted },
+                            ))
                             .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
                                 ws.save(&Save, window, cx)
                             })),
                     )
                     .child(
-                        icon_button("open", "Open (Ctrl+O)")
-                            .icon(IconName::FolderOpen)
+                        icon_button("open", commands::tooltip("Open", "open"))
+                            .child(icon(IconName::FolderOpen, 16., t.text_muted))
                             .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
                                 ws.open(&Open, window, cx)
                             })),
                     )
+                    .child(div().w(px(1.)).h(px(16.)).bg(t.rule))
                     .child(
-                        icon_button("share-x", "Share to X")
-                            .icon(gpui_kit_assets::IconName::Share2)
-                            .label("X")
-                            .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
-                                ws.share_x(&ShareX, window, cx)
-                            })),
-                    )
-                    .child(
-                        icon_button("share-linkedin", "Share to LinkedIn")
-                            .icon(gpui_kit_assets::IconName::Share2)
-                            .label("in")
-                            .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
-                                ws.share_linkedin(&ShareLinkedIn, window, cx)
-                            })),
+                        Popover::new("share-menu")
+                            .anchor(Anchor::BottomLeft)
+                            .offset(px(6.))
+                            .trigger(ShareButton {
+                                open: self.share_open,
+                                theme: t,
+                            })
+                            .open(self.share_open)
+                            .on_open_change(cx.listener(|ws, open: &bool, _, cx| {
+                                ws.share_open = *open;
+                                cx.notify();
+                            }))
+                            .p(px(5.))
+                            .rounded(px(10.))
+                            .bg(t.panel)
+                            .border_color(t.rule)
+                            .content(move |_, _, _| {
+                                let share_button = |target: ShareTarget| {
+                                    let (id, label, logo, size) = match target {
+                                        ShareTarget::X => {
+                                            ("share-x", "Share to X", assets::X_LOGO, 17.)
+                                        }
+                                        ShareTarget::LinkedIn => (
+                                            "share-linkedin",
+                                            "Share to LinkedIn",
+                                            assets::LINKEDIN_LOGO,
+                                            18.,
+                                        ),
+                                    };
+                                    let workspace = workspace.clone();
+                                    div()
+                                        .id(id)
+                                        .debug_selector(move || id.into())
+                                        .size(px(38.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(7.))
+                                        .cursor_pointer()
+                                        .text_color(t.text)
+                                        .hover(|d| d.bg(t.selection).text_color(t.accent))
+                                        .child(Icon::empty().path(logo).size(px(size)))
+                                        .tooltip(tooltip_text(label.into()))
+                                        .on_click(move |_, _, cx| {
+                                            workspace.update(cx, |ws, cx| {
+                                                ws.share_open = false;
+                                                ws.share(target, cx);
+                                            });
+                                        })
+                                };
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .gap(px(4.))
+                                    .child(share_button(ShareTarget::X))
+                                    .child(share_button(ShareTarget::LinkedIn))
+                            }),
                     ),
             )
             .child({
@@ -476,8 +540,7 @@ impl Workspace {
                     .anchor(Anchor::BottomCenter)
                     .trigger(LabButton {
                         open: self.lab_open,
-                        accent: t.accent,
-                        hover: t.panel,
+                        theme: t,
                     })
                     .open(self.lab_open)
                     .track_focus(&self.lab.read(cx).focus)
@@ -493,24 +556,87 @@ impl Workspace {
             .child(
                 div().flex_1().flex().flex_row().justify_end().child(
                     div()
-                        .id("xyz")
-                        .px_3()
-                        .py_0p5()
-                        .rounded_md()
+                        .id("overflow-button")
+                        .debug_selector(|| "overflow-button".into())
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(8.))
+                        .px(px(12.))
+                        .py(px(6.))
+                        .rounded(px(8.))
                         .border_1()
-                        .border_color(if overflow_open { t.accent } else { t.rule })
-                        .text_color(if overflow_open {
-                            t.accent
-                        } else {
-                            t.text_muted
-                        })
+                        .border_color(t.rule)
+                        .text_color(t.text_muted)
                         .cursor_pointer()
-                        .hover(|s| s.bg(t.panel))
-                        .child("XYZ")
+                        .when(overflow_open, |d| d.bg(t.selection))
+                        .when(!overflow_open, |d| d.hover(|d| d.bg(t.panel)))
+                        .child(icon(IconName::PanelRight, 14., t.text_muted))
+                        .child("Overflow")
+                        .when(stashed > 0, |d| {
+                            d.child(
+                                div()
+                                    .debug_selector(|| "stash-count".into())
+                                    .px(px(6.))
+                                    .py(px(1.))
+                                    .rounded(px(4.))
+                                    .bg(t.panel)
+                                    .text_size(px(11.))
+                                    .line_height(px(14.))
+                                    .text_color(t.text)
+                                    .child(stashed.to_string()),
+                            )
+                        })
+                        .tooltip(tooltip_text(commands::tooltip(
+                            "Show / hide Overflow",
+                            "toggle_overflow",
+                        )))
                         .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
                             ws.toggle_overflow(&ToggleOverflowPanel, window, cx)
                         })),
                 ),
             )
+    }
+}
+
+/// The footer's Share ▾ button: the trigger of the menu with the X and LinkedIn buttons.
+#[derive(IntoElement)]
+struct ShareButton {
+    open: bool,
+    theme: Theme,
+}
+
+impl Selectable for ShareButton {
+    fn selected(mut self, selected: bool) -> Self {
+        self.open = selected;
+        self
+    }
+
+    fn is_selected(&self) -> bool {
+        self.open
+    }
+}
+
+impl RenderOnce for ShareButton {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let t = self.theme;
+        let color = if self.open { t.accent } else { t.text_muted };
+        div()
+            .id("share")
+            .debug_selector(|| "share-button".into())
+            .h(px(30.))
+            .px(px(8.))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(6.))
+            .rounded(px(6.))
+            .cursor_pointer()
+            .text_color(color)
+            .when(self.open, |d| d.bg(t.selection))
+            .when(!self.open, |d| d.hover(|d| d.bg(t.panel)))
+            .child(icon(gpui_kit_assets::IconName::Share, 15., color))
+            .child("Share")
+            .child(icon(IconName::ChevronDown, 13., color))
     }
 }
