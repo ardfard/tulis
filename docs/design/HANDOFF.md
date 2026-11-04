@@ -47,7 +47,9 @@ strokes, padding on text) will error.
 - **Sections** are top-level frames with a dark backing: `Section 00: Overview and tokens` (principles,
   token swatches for all four themes, typography, metrics, anatomy, index, keyboard model), then
   `01 Themes`, `02 Page states`, `03 Alternates sidebar and context menu`, `04 Overflow scratchpad`,
-  `05 The Lab`, `06 Chrome, overlays and feedback`.
+  `05 The Lab`, `06 Chrome, overlays and feedback`, `07 Motion` (motion tokens `motion-fast/base/slow/hold`
+  in ms, easing, and keyframe strips for the version swap, the Lab scan line, smooth jumps and chrome
+  auto-dim; pen.dev has no timeline, so motion is documented as storyboards).
 - **Every screen** is a `Spec: <title>` frame: a title, a line of keyboard and vim shortcuts, a note, then
   a 1140 × 720 `Window` (header 44, body 628, footer 48; writing column 640 wide, 27px line pitch).
 - **Reusable components** at the document root: `Header` and `Footer`. Screens use them as instances and
@@ -99,6 +101,9 @@ strokes, padding on text) will error.
 - **Sample text** in the board is placeholder copy ("On Editing in Layers"), not real content.
 
 ## When you improve the design
+
+To have an AI agent implement board changes in Rust, use the prompt in
+[IMPLEMENTING.md](IMPLEMENTING.md).
 
 1. Change the board. Keep tokens as variables and keep the `Spec:` annotations (title, keys, note) in
    step with the behavior.
