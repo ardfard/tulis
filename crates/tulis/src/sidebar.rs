@@ -167,6 +167,7 @@ impl Render for AltSidebar {
             return div().into_any_element();
         };
         let rows = editor.alt_rows();
+        let font = editor.font_family.clone();
         let editor_handle = self.editor.clone();
         let tabs = TabBar::new("alt-tabs")
             .underline()
@@ -217,32 +218,53 @@ impl Render for AltSidebar {
                     .p_2()
                     .flex()
                     .flex_col()
-                    .gap_1()
+                    .gap(px(12.))
                     .children(rows.into_iter().enumerate().map(|(ix, row)| {
                         let highlighted = ix == session.highlight;
                         div()
                             .id(("alt-row", ix))
                             .flex()
                             .flex_row()
-                            .gap_2()
-                            .px_2()
-                            .py_1()
-                            .rounded_md()
+                            .gap(px(10.))
+                            .px(px(10.))
+                            .py(px(8.))
+                            .rounded(px(6.))
                             .cursor_pointer()
                             .when(highlighted, |d| d.bg(t.selection))
+                            .when(!highlighted, |d| d.hover(|d| d.bg(t.rule)))
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 this.keep_row(ix, window, cx)
                             }))
+                            // The same dot language as the paragraph version dots.
                             .child(
                                 div()
-                                    .w(px(10.))
+                                    .w(px(12.))
                                     .flex_none()
+                                    .text_size(px(13.))
+                                    .line_height(px(19.5))
                                     .text_color(if row.shown { t.accent } else { t.text_muted })
                                     .child(if row.shown { "●" } else { "·" }),
                             )
-                            .child(div().flex_1().min_w(px(0.)).line_clamp(3).child(row.text))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .font_family(font.clone())
+                                    .text_size(px(13.))
+                                    .line_height(px(19.5))
+                                    .text_color(if highlighted { t.text } else { t.text_muted })
+                                    .line_clamp(3)
+                                    .child(row.text),
+                            )
                             .when(row.ai, |d| {
-                                d.child(div().flex_none().text_color(t.ai_accent).child("✦"))
+                                d.child(
+                                    div()
+                                        .flex_none()
+                                        .text_size(px(12.))
+                                        .line_height(px(19.5))
+                                        .text_color(t.ai_accent)
+                                        .child("✦"),
+                                )
                             })
                     })),
             )

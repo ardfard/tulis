@@ -101,8 +101,8 @@ pub struct LayoutCache {
     pub width: Pixels,
     pub line_height: Pixels,
     pub paras: Vec<ParaLayout>,
-    /// Clickable `⋮` handles of paragraphs with versions: (paragraph index, window bounds).
-    pub version_handles: Vec<(usize, Bounds<Pixels>)>,
+    /// Clickable version dots: (paragraph index, version index, window bounds).
+    pub version_dots: Vec<(usize, usize, Bounds<Pixels>)>,
 }
 
 impl LayoutCache {
@@ -219,7 +219,7 @@ mod tests {
                 text_len,
                 x_offset: px(0.),
             }],
-            version_handles: Vec::new(),
+            version_dots: Vec::new(),
         }
     }
 

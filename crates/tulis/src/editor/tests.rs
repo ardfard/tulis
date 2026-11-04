@@ -778,19 +778,20 @@ fn cycling_boxes_the_group_until_the_cursor_leaves(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn clicking_the_version_handle_opens_the_paragraph_tab(cx: &mut TestAppContext) {
+fn clicking_a_version_dot_shows_it_in_the_paragraph_tab(cx: &mut TestAppContext) {
     let (editor, cx) = editor_with(cx, &["Intro.", "Draft one."]);
     editor.update(cx, |e, _| {
         e.doc.add_version(1, "Draft two.".into());
     });
     cx.simulate_resize(gpui::size(gpui::px(800.), gpui::px(600.)));
     cx.run_until_parked();
-    let handle = editor.read_with(cx, |e, _| {
+    let dot = editor.read_with(cx, |e, _| {
         let layout = e.layout.as_ref().expect("painted");
-        assert_eq!(layout.version_handles.len(), 1);
-        layout.version_handles[0].1
+        assert_eq!(layout.version_dots.len(), 2);
+        assert!(layout.version_dots.iter().all(|(para, _, _)| *para == 1));
+        layout.version_dots[0].2
     });
-    cx.simulate_click(handle.center(), gpui::Modifiers::none());
+    cx.simulate_click(dot.center(), gpui::Modifiers::none());
     let session = editor.read_with(cx, |e, _| e.alt_session.clone()).unwrap();
     assert_eq!(session.scope, Scope::Paragraph);
     assert_eq!(
@@ -799,8 +800,9 @@ fn clicking_the_version_handle_opens_the_paragraph_tab(cx: &mut TestAppContext) 
     );
     assert_eq!(
         rows(&editor, cx),
-        vec![row("Draft one.", false), row("Draft two.", true)]
+        vec![row("Draft one.", true), row("Draft two.", false)]
     );
+    assert_eq!(texts(&editor, cx), vec!["Intro.", "Draft one."]);
 }
 
 #[gpui::test]
@@ -812,7 +814,7 @@ fn hidden_markers_record_no_handles(cx: &mut TestAppContext) {
     });
     cx.simulate_resize(gpui::size(gpui::px(800.), gpui::px(600.)));
     cx.run_until_parked();
-    let handles = editor.read_with(cx, |e, _| e.layout.as_ref().unwrap().version_handles.len());
+    let handles = editor.read_with(cx, |e, _| e.layout.as_ref().unwrap().version_dots.len());
     assert_eq!(handles, 0);
 }
 

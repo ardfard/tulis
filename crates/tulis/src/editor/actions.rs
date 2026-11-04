@@ -271,11 +271,14 @@ impl Editor {
         let Some(layout) = self.layout.as_ref() else {
             return;
         };
-        if let Some(para) = super::markers::handle_at(&layout.version_handles, event.position)
+        // A version dot shows that version, in the sidebar's Paragraph tab.
+        if let Some((para, version)) =
+            super::markers::version_dot_at(&layout.version_dots, event.position)
             && para < self.doc.paragraphs.len()
         {
             self.set_selection(Selection::caret(DocPos::new(para, 0)), cx);
             self.open_alternates(Some(super::Scope::Paragraph), cx);
+            self.preview_alternate(version, cx);
             return;
         }
         let pos = self.doc.clamp(layout.pos_for_window_point(event.position));

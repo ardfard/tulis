@@ -1921,8 +1921,8 @@ mod tests {
         let width = ws.read_with(cx, |ws, cx| {
             ws.editor.read(cx).layout.as_ref().expect("painted").width
         });
-        // 580 - 2 * 32 padding - 2 * 24 gutter.
-        assert_eq!(width, gpui::px(468.));
+        // 580 - 2 * 32 padding - 2 * 36 gutter.
+        assert_eq!(width, gpui::px(444.));
     }
 
     #[gpui::test]

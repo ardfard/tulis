@@ -39,8 +39,9 @@ impl IntoElement for EditorElement {
     }
 }
 
-/// Horizontal space kept free on each side of the text, for the paragraph-version bar.
-pub(crate) const GUTTER: Pixels = px(24.);
+/// Horizontal space kept free on each side of the text, for the paragraph-version bar and its
+/// dots (which must be inside the element to be clicked).
+pub(crate) const GUTTER: Pixels = px(36.);
 
 /// Text alpha of the paragraphs around the alternates sidebar's target while it has focus.
 pub(crate) const DIM_ALPHA: f32 = 0.35;
@@ -144,12 +145,12 @@ pub(super) fn build_layout(
         width,
         line_height: lh,
         paras,
-        version_handles: Vec::new(),
+        version_dots: Vec::new(),
     }
 }
 
-/// Dotted underlines under alternate groups, version bars with their handles (recorded in
-/// `layout.version_handles` for clicks), and the box around a group just cycled.
+/// Dotted underlines under alternate groups, version bars with their dots (recorded in
+/// `layout.version_dots` for clicks), and the box around a group just cycled.
 pub(super) fn marker_quads(
     editor: &Editor,
     layout: &mut LayoutCache,
@@ -184,12 +185,16 @@ pub(super) fn marker_quads(
             let height = pl.height(lh);
             let bar = faded(t.accent, 0.6 * alpha);
             quads.push(fill(markers::version_bar(left, para_top, height), bar));
-            let handle = markers::version_handle(left, para_top, height);
-            let c = handle.center();
-            let gap = Bounds::new(point(c.x - px(2.), c.y - px(7.)), size(px(4.), px(14.)));
-            quads.push(fill(gap, t.background));
-            quads.extend(markers::handle_dots(handle).map(|dot| fill(dot, faded(t.accent, alpha))));
-            layout.version_handles.push((ix, handle));
+            let dots = markers::version_dots(left, para_top, lh, p.versions.len(), p.active);
+            for (version, (dot, hit)) in dots.into_iter().enumerate() {
+                let color = if version == p.active {
+                    t.accent
+                } else {
+                    t.text_muted
+                };
+                quads.push(fill(dot, faded(color, alpha)).corner_radii(dot.size.width / 2.));
+                layout.version_dots.push((ix, version, hit));
+            }
         }
     }
     if let Some(cycled) = &editor.cycled
