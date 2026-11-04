@@ -3,12 +3,13 @@
 use std::time::Instant;
 
 use gpui::{
-    Anchor, Animation, AnimationExt, App, ClickEvent, ClipboardItem, Context, IntoElement,
-    ParentElement, Styled, Window, div, prelude::*, px,
+    Anchor, Animation, AnimationExt, AnyView, App, ClickEvent, ClipboardItem, Context, Div,
+    FontWeight, Hsla, IntoElement, ParentElement, Stateful, Styled, Window, div, prelude::*, px,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::popover::Popover;
-use gpui_component::{IconName, Selectable, Sizable};
+use gpui_component::tooltip::Tooltip;
+use gpui_component::{Icon, IconName, Sizable};
 use tulis_core::alternates::AltLevel;
 use tulis_core::share::{self, ShareTarget};
 use tulis_core::stats;
@@ -18,11 +19,13 @@ use crate::actions::{
     Open, OpenLab, Save, ShareLinkedIn, ShareX, ShowCheatSheet, ToggleMarkers, ToggleOverflowPanel,
     TogglePreview,
 };
+use crate::commands;
 use crate::lab_popover::LabButton;
+use crate::theme::Theme;
 use crate::toast::TOAST_FADE;
 use crate::workspace::{Workspace, file_name};
 
-pub const HEADER_HEIGHT: f32 = 40.;
+pub const HEADER_HEIGHT: f32 = 44.;
 pub const FOOTER_HEIGHT: f32 = 44.;
 
 pub(crate) fn mode_label(mode: Mode) -> &'static str {
@@ -32,6 +35,39 @@ pub(crate) fn mode_label(mode: Mode) -> &'static str {
         Mode::Visual => "VISUAL",
         Mode::VisualLine => "V-LINE",
     }
+}
+
+/// What the header shows besides the file name.
+#[derive(Debug, PartialEq)]
+pub(crate) struct HeaderStatus {
+    pub counts: String,
+    pub vim: Option<&'static str>,
+    /// Alternate position and AI work, drawn as panel badges.
+    pub badges: Vec<String>,
+}
+
+pub(crate) fn icon(name: impl Into<Icon>, size: f32, color: Hsla) -> Icon {
+    Icon::new(name).size(px(size)).text_color(color)
+}
+
+pub(crate) fn tooltip_text(text: String) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    move |window, cx| Tooltip::new(text.clone()).build(window, cx)
+}
+
+/// One of the header's paired toggles: a 30 × 26 icon button, filled while on.
+fn header_toggle(id: &'static str, name: IconName, on: bool, t: &Theme) -> Stateful<Div> {
+    div()
+        .id(id)
+        .w(px(30.))
+        .h(px(26.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.))
+        .cursor_pointer()
+        .when(on, |d| d.bg(t.selection))
+        .when(!on, |d| d.hover(|d| d.bg(t.rule)))
+        .child(icon(name, 15., if on { t.accent } else { t.text_muted }))
 }
 
 /// Distance of the toast stack from the window's bottom edge (above the footer).
@@ -101,8 +137,9 @@ impl Workspace {
         }));
     }
 
-    /// The left part of the header: counts, then the vim, alternate and AI badges.
-    pub(crate) fn header_status(&self, cx: &App) -> (String, Vec<String>) {
+    /// What the header shows: counts (of the selection, if any), the vim mode and the
+    /// alternate and AI badges.
+    pub(crate) fn header_status(&self, cx: &App) -> HeaderStatus {
         let editor = self.editor.read(cx);
         let range = editor.selection.range();
         let counts = if range.start == range.end {
@@ -111,9 +148,6 @@ impl Workspace {
             stats::selection_counts(&editor.doc, range).label(true)
         };
         let mut badges = Vec::new();
-        if let Some(mode) = editor.vim_mode() {
-            badges.push(mode_label(mode).to_string());
-        }
         if let Some(info) = editor.doc.alt_info(editor.cursor()) {
             let label = match info.level {
                 AltLevel::Word => "alt",
@@ -124,88 +158,146 @@ impl Workspace {
         if editor.ai_task.is_some() {
             badges.push("AI…".into());
         }
-        (counts, badges)
+        HeaderStatus {
+            counts,
+            vim: editor.vim_mode().map(mode_label),
+            badges,
+        }
     }
 
+    /// File name and unsaved dot on the left, the markers and preview toggles in one panel in
+    /// the middle, counts and the cheat-sheet button on the right.
     pub(crate) fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let editor = self.editor.read(cx);
         let t = editor.theme;
         let show_markers = editor.show_markers;
+        let dirty = editor.dirty;
         let previewing = self.preview;
-        let (counts, badges) = self.header_status(cx);
+        let name = self
+            .path
+            .as_deref()
+            .map(file_name)
+            .unwrap_or_else(|| "Untitled".into());
+        let status = self.header_status(cx);
         let dimmed = self.header_dim.is_dimmed(Instant::now());
+        let badge = |label: String| {
+            div()
+                .px(px(7.))
+                .py(px(2.))
+                .rounded(px(6.))
+                .text_size(px(12.))
+                .line_height(px(16.))
+                .child(label)
+        };
         let header = div()
             .id("header")
             .h(px(HEADER_HEIGHT))
             .flex_none()
-            .px_4()
+            .px(px(20.))
             .flex()
             .flex_row()
             .items_center()
-            .text_xs()
+            .text_size(px(13.))
             .text_color(t.text_muted)
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.))
+                    .pl(px(7.))
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap_2()
-                    .child(counts)
-                    .children(badges.into_iter().map(|badge| {
+                    .gap(px(10.))
+                    .child(
                         div()
-                            .px_1()
-                            .rounded_sm()
+                            .debug_selector(|| "doc-name".into())
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(t.text)
+                            .truncate()
+                            .child(name),
+                    )
+                    .when(dirty, |row| {
+                        row.child(
+                            div()
+                                .debug_selector(|| "unsaved-dot".into())
+                                .flex_none()
+                                .size(px(6.))
+                                .rounded_full()
+                                .bg(t.accent),
+                        )
+                    })
+                    .children(status.vim.map(|mode| {
+                        badge(mode.into())
                             .border_1()
-                            .border_color(t.rule)
+                            .border_color(t.accent)
                             .text_color(t.accent)
-                            .child(badge)
-                    })),
+                    }))
+                    .children(
+                        status
+                            .badges
+                            .into_iter()
+                            .map(|label| badge(label).bg(t.panel)),
+                    ),
             )
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap_1()
+                    .gap(px(2.))
+                    .p(px(3.))
+                    .rounded(px(9.))
+                    .bg(t.panel)
                     .child(
-                        Button::new("toggle-markers")
-                            .ghost()
-                            .xsmall()
-                            .icon(if show_markers {
-                                IconName::Eye
-                            } else {
-                                IconName::EyeOff
-                            })
-                            .selected(show_markers)
-                            .tooltip("Markers (Ctrl+.)")
+                        header_toggle("toggle-markers", IconName::Eye, show_markers, &t)
+                            .tooltip(tooltip_text(commands::tooltip("Markers", "toggle_markers")))
                             .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
                                 ws.toggle_markers(&ToggleMarkers, window, cx)
                             })),
                     )
                     .child(
-                        Button::new("toggle-preview")
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::FileText)
-                            .selected(previewing)
-                            .tooltip("Markdown preview (Ctrl+Shift+M)")
+                        header_toggle("toggle-preview", IconName::FileText, previewing, &t)
+                            .tooltip(tooltip_text(commands::tooltip(
+                                "Markdown preview",
+                                "toggle_preview",
+                            )))
                             .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
                                 ws.toggle_preview(&TogglePreview, window, cx)
                             })),
                     ),
             )
             .child(
-                div().flex_1().flex().flex_row().justify_end().child(
-                    Button::new("cheat-sheet")
-                        .ghost()
-                        .xsmall()
-                        .icon(gpui_kit_assets::IconName::Keyboard)
-                        .tooltip("Cheat sheet (Ctrl+?)")
-                        .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
-                            ws.show_cheat_sheet(&ShowCheatSheet, window, cx)
-                        })),
-                ),
+                div()
+                    .flex_1()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(14.))
+                    .child(
+                        div()
+                            .debug_selector(|| "counts".into())
+                            .child(status.counts),
+                    )
+                    .child(
+                        div()
+                            .id("cheat-sheet")
+                            .size(px(28.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(6.))
+                            .cursor_pointer()
+                            .hover(|d| d.bg(t.panel))
+                            .child(icon(gpui_kit_assets::IconName::Keyboard, 17., t.text_muted))
+                            .tooltip(tooltip_text(commands::tooltip(
+                                "Cheat sheet",
+                                "cheat_sheet",
+                            )))
+                            .on_click(cx.listener(|ws, _: &ClickEvent, window, cx| {
+                                ws.show_cheat_sheet(&ShowCheatSheet, window, cx)
+                            })),
+                    ),
             );
         if dimmed {
             header

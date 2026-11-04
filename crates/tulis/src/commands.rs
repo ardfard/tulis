@@ -656,43 +656,69 @@ pub fn key_bindings(cx: &App) -> Vec<KeyBinding> {
 /// `"secondary-k t"` → `"Ctrl+K T"`.
 pub fn key_label(keys: &str) -> String {
     keys.split(' ')
-        .map(|stroke| {
-            let parts: Vec<&str> = stroke.split('-').collect();
-            // A trailing "-" means the key itself is "-" (e.g. "ctrl--").
-            let (mods, key) = match parts.as_slice() {
-                [mods @ .., "", ""] => (mods, "-"),
-                [mods @ .., key] => (mods, *key),
-                [] => (&[][..], ""),
-            };
-            let mut out: Vec<String> = mods
-                .iter()
-                .map(|m| {
-                    match *m {
-                        "secondary" if cfg!(target_os = "macos") => "Cmd",
-                        "secondary" | "ctrl" => "Ctrl",
-                        "cmd" => "Cmd",
-                        "alt" => "Alt",
-                        "shift" => "Shift",
-                        other => other,
-                    }
-                    .to_string()
-                })
-                .collect();
-            out.push(match key {
-                "up" => "↑".into(),
-                "down" => "↓".into(),
-                "left" => "←".into(),
-                "right" => "→".into(),
-                "enter" => "Enter".into(),
-                "escape" => "Esc".into(),
-                "backspace" => "Backspace".into(),
-                "tab" => "Tab".into(),
-                other => other.to_uppercase(),
-            });
-            out.join("+")
-        })
+        .map(|stroke| stroke_parts(stroke).join("+"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The same keys as drawn in a key pill, spaced instead of joined: `"Ctrl Shift M"`.
+pub fn key_pill(keys: &str) -> String {
+    keys.split(' ')
+        .flat_map(stroke_parts)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The first (displayed) keys of the command with this id.
+pub fn command_keys(id: &str) -> Option<&'static str> {
+    COMMANDS
+        .iter()
+        .find(|c| c.id == id)
+        .and_then(|c| c.keys.first().copied())
+}
+
+/// A tooltip naming a command and its key: `"Markers (Ctrl+.)"`.
+pub fn tooltip(label: &str, id: &str) -> String {
+    match command_keys(id) {
+        Some(keys) => format!("{label} ({})", key_label(keys)),
+        None => label.to_string(),
+    }
+}
+
+fn stroke_parts(stroke: &str) -> Vec<String> {
+    let parts: Vec<&str> = stroke.split('-').collect();
+    // A trailing "-" means the key itself is "-" (e.g. "ctrl--").
+    let (mods, key) = match parts.as_slice() {
+        [mods @ .., "", ""] => (mods, "-"),
+        [mods @ .., key] => (mods, *key),
+        [] => (&[][..], ""),
+    };
+    let mut out: Vec<String> = mods
+        .iter()
+        .map(|m| {
+            match *m {
+                "secondary" if cfg!(target_os = "macos") => "Cmd",
+                "secondary" | "ctrl" => "Ctrl",
+                "cmd" => "Cmd",
+                "alt" => "Alt",
+                "shift" => "Shift",
+                other => other,
+            }
+            .to_string()
+        })
+        .collect();
+    out.push(match key {
+        "up" => "↑".into(),
+        "down" => "↓".into(),
+        "left" => "←".into(),
+        "right" => "→".into(),
+        "enter" => "Enter".into(),
+        "escape" => "Esc".into(),
+        "backspace" => "Backspace".into(),
+        "tab" => "Tab".into(),
+        other => other.to_uppercase(),
+    });
+    out
 }
 
 /// A command shown in the cheat sheet: label, key label (or "—") and vim keys.
@@ -866,6 +892,15 @@ mod tests {
         assert_eq!(key_label("secondary-/"), format!("{ctrl}+/"));
         assert_eq!(key_label("secondary-shift-a"), format!("{ctrl}+Shift+A"));
         assert_eq!(key_label("shift-tab"), "Shift+Tab");
+        assert_eq!(key_pill("secondary-shift-a"), format!("{ctrl} Shift A"));
+        assert_eq!(key_pill("secondary-k t"), format!("{ctrl} K T"));
+        assert_eq!(key_pill("ctrl--"), "Ctrl -");
+        assert_eq!(command_keys("open_lab"), Some("secondary-l"));
+        assert_eq!(
+            tooltip("Markers", "toggle_markers"),
+            format!("Markers ({ctrl}+.)")
+        );
+        assert_eq!(tooltip("Share to X", "share_x"), "Share to X");
     }
 
     #[test]

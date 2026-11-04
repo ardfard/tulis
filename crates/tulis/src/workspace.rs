@@ -1987,7 +1987,7 @@ mod tests {
             ws.editor.update(cx, |e, cx| {
                 e.replace_text_in_range(None, "# Title here", window, cx);
             });
-            assert_eq!(ws.header_status(cx).0, "2 words · 10 chars");
+            assert_eq!(ws.header_status(cx).counts, "2 words · 10 chars");
             ws.editor.update(cx, |e, cx| {
                 e.selection = Selection {
                     anchor: DocPos::new(0, 2),
@@ -1995,9 +1995,10 @@ mod tests {
                 };
                 e.toggle_vim(&crate::actions::ToggleVim, window, cx);
             });
-            let (counts, badges) = ws.header_status(cx);
-            assert_eq!(counts, "1 word · 5 chars selected");
-            assert_eq!(badges, vec!["NORMAL".to_string()]);
+            let status = ws.header_status(cx);
+            assert_eq!(status.counts, "1 word · 5 chars selected");
+            assert_eq!(status.vim, Some("NORMAL"));
+            assert!(status.badges.is_empty());
         });
     }
 
