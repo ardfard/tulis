@@ -131,6 +131,12 @@ pub struct Editor {
     pub(crate) lab_scan: Option<(Vec<ParaId>, std::time::Instant)>,
     /// Repaints the scan line one step at a time.
     lab_scan_ticker: Option<Task<()>>,
+    /// The next autoscroll is a jump the app makes for you (to paragraph `.0`): it glides there
+    /// instead of snapping.
+    pub(crate) jump_request: Option<usize>,
+    /// A jump gliding to its place, and the tint on where it lands.
+    pub(crate) scroll_anim: Option<swap::ScrollAnim>,
+    pub(crate) arrive_tint: Option<(ParaId, std::time::Instant)>,
     /// When the last Lab results landed: cuts and marks fade in from then.
     pub(crate) lab_arrived: Option<std::time::Instant>,
     /// IME marked text, as a byte range of `doc.flat_text()`.
@@ -188,6 +194,9 @@ impl Editor {
             swap: None,
             version_hover: None,
             lab_scan: None,
+            jump_request: None,
+            scroll_anim: None,
+            arrive_tint: None,
             lab_scan_ticker: None,
             lab_arrived: None,
             alt_session: None,
@@ -231,6 +240,8 @@ impl Editor {
         self.trim_preview = None;
         self.swap = None;
         self.version_hover = None;
+        self.scroll_anim = None;
+        self.arrive_tint = None;
         self.marks.clear();
         self.lab_fixes = None;
         self.trim_cache.clear();
@@ -437,6 +448,7 @@ impl Editor {
     pub fn jump_to_paragraph(&mut self, para: usize, cx: &mut Context<Self>) {
         if para < self.doc.paragraphs.len() {
             self.set_selection(Selection::caret(DocPos::new(para, 0)), cx);
+            self.smooth_jump(para);
         }
     }
 

@@ -19,7 +19,7 @@ use crate::actions::{
     Save, SaveAs, SendToOverflow, ToggleGhost, ToggleMarkers, ToggleOverflowPanel, TogglePreview,
 };
 use crate::editor::{Editor, EditorEvent, GUTTER, markers};
-use crate::header_dim::HeaderDim;
+use crate::header_dim::{ChromeFade, HeaderDim};
 use crate::lab_popover::{LabEvent, LabPanel};
 use crate::scratchpad::OverflowDrag;
 use crate::theme;
@@ -42,6 +42,9 @@ pub struct Workspace {
     /// The footer's Share menu is open.
     pub(crate) share_open: bool,
     pub(crate) header_dim: HeaderDim,
+    /// The chrome's fade toward (or away from) dimmed, and its opacity this frame.
+    pub(crate) chrome_fade: ChromeFade,
+    pub(crate) chrome_opacity: f32,
     /// Repaints the header when its auto-dim state is due to change.
     pub(crate) dim_timer: Option<Task<()>>,
     pub(crate) window_title: String,
@@ -88,6 +91,13 @@ impl Workspace {
                     },
                 ),
             ];
+        // Typing is never delayed: any key press first jumps running animations to their end
+        // (before its action runs, so an animation the key starts survives).
+        let settle = editor.downgrade();
+        let mut subscriptions = subscriptions;
+        subscriptions.push(cx.intercept_keystrokes(move |_, _, cx| {
+            settle.update(cx, |e, cx| e.settle_motion(cx)).ok();
+        }));
         let initial_theme = editor.read(cx).theme;
         theme::apply_to_components(&initial_theme, cx);
         let mut workspace = Self {
@@ -104,6 +114,8 @@ impl Workspace {
             lab_open: false,
             share_open: false,
             header_dim: HeaderDim::default(),
+            chrome_fade: ChromeFade::default(),
+            chrome_opacity: 1.,
             dim_timer: None,
             window_title: String::new(),
             _subscriptions: subscriptions,
@@ -501,6 +513,7 @@ impl Workspace {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_window_title(window, cx);
+        self.update_chrome_opacity(window, cx);
         let t = self.editor.read(cx).theme;
         div()
             .size_full()
@@ -1736,6 +1749,22 @@ mod tests {
         draw(cx);
         let head = ws.read_with(cx, |ws, cx| ws.editor.read(cx).selection.head);
         assert_eq!(head, DocPos::new(30, 0));
+        // The jump glides there and tints where it lands; a key press finishes it at once.
+        let (glide, tint) = ws.read_with(cx, |ws, cx| {
+            let e = ws.editor.read(cx);
+            (e.scroll_anim, e.arrive_tint)
+        });
+        let glide = glide.expect("a glide");
+        let target = glide.to;
+        assert!(target < glide.from);
+        assert!(tint.is_some());
+        cx.simulate_keystrokes("right");
+        let (offset, glide) = ws.read_with(cx, |ws, cx| {
+            let e = ws.editor.read(cx);
+            (e.scroll.offset().y, e.scroll_anim)
+        });
+        assert!(glide.is_none());
+        assert_eq!(offset, target);
     }
 
     #[gpui::test]

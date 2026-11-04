@@ -9,9 +9,9 @@ use gpui::{
 
 use std::time::{Duration, Instant};
 
-use super::Editor;
 use super::layout::{LayoutCache, ParaLayout, clamp_px};
 use super::markers::{self, DOT};
+use super::{Editor, swap};
 use crate::motion;
 use crate::runs::{RunStyle, build_runs};
 use tulis_core::ParaId;
@@ -287,6 +287,16 @@ fn swap_paint(editor: &Editor, layout: &LayoutCache, window: &mut Window) -> Swa
             out.old = Some((ParaLayout::new(top, line, text.len(), x_offset), bounds));
         }
     }
+    if let Some((id, start)) = editor.arrive_tint
+        && !swap::arrive_tint_done(start, now)
+        && let Some(ix) = editor.doc.para_index(id)
+    {
+        out.animating = true;
+        let alpha = swap::arrive_tint_alpha(start, now);
+        if tint.is_none_or(|(_, a)| a < alpha) {
+            tint = Some((ix, alpha));
+        }
+    }
     if let Some(hover) = editor.version_hover {
         let alpha = hover.tint_alpha(now);
         out.animating |= alpha < 1.;
@@ -425,6 +435,22 @@ fn selection_quads(editor: &Editor, layout: &LayoutCache) -> Vec<PaintQuad> {
     quads
 }
 
+/// Where a jump the app makes for you scrolls to, if the caret is not comfortably in view: the
+/// offset that puts it a third of the way down the page.
+fn jump_target(scroll: &ScrollHandle, caret: Point<Pixels>, line_height: Pixels) -> Option<Pixels> {
+    let viewport = scroll.bounds();
+    if viewport.size.height <= px(0.) {
+        return None;
+    }
+    let top = viewport.origin.y;
+    let bottom = top + viewport.size.height;
+    if caret.y >= top + line_height && caret.y + line_height * 2. <= bottom {
+        return None;
+    }
+    let target = scroll.offset().y - (caret.y - (top + viewport.size.height / 3.));
+    Some(clamp_px(target, -scroll.max_offset().y, px(0.)))
+}
+
 /// Adjust `scroll` so the caret is visible. Returns true if the offset changed.
 fn scroll_into_view(scroll: &ScrollHandle, caret: Point<Pixels>, line_height: Pixels) -> bool {
     let viewport = scroll.bounds();
@@ -527,15 +553,71 @@ impl Element for EditorElement {
         let wants_autoscroll = editor.autoscroll;
         let caret = layout.window_point(editor.selection.head);
         let scroll = editor.scroll.clone();
-        if wants_autoscroll {
-            if let Some(caret) = caret {
-                if scroll_into_view(&scroll, caret, lh) {
-                    window.request_animation_frame();
+        let now = Instant::now();
+        let mut animating = animating;
+        // A glide in progress: one step, unless the user scrolled meanwhile (that ends it).
+        let mut glide = editor.scroll_anim;
+        if let Some(anim) = glide.as_mut() {
+            let mut offset = scroll.offset();
+            if offset.y != anim.last {
+                glide = None;
+            } else {
+                offset.y = anim.offset_at(now);
+                anim.last = offset.y;
+                scroll.set_offset(offset);
+                if anim.done(now) {
+                    glide = None;
+                } else {
+                    animating = true;
                 }
             }
-            self.editor
-                .update(cx, |editor, _| editor.autoscroll = false);
         }
+        let mut arrive = editor
+            .arrive_tint
+            .filter(|(_, start)| !swap::arrive_tint_done(*start, now));
+        if wants_autoscroll {
+            let jump = editor
+                .jump_request
+                .and_then(|para| Some((para, editor.doc.paragraphs.get(para)?.id)));
+            if let Some(caret) = caret {
+                match jump {
+                    Some((_, id)) if !cx.reduce_motion() => {
+                        if let Some(to) = jump_target(&scroll, caret, lh) {
+                            let from = scroll.offset().y;
+                            glide = Some(swap::ScrollAnim {
+                                from,
+                                to,
+                                start: now,
+                                last: from,
+                            });
+                        }
+                        arrive = Some((id, now));
+                        animating = true;
+                    }
+                    Some(_) => {
+                        if let Some(to) = jump_target(&scroll, caret, lh) {
+                            let mut offset = scroll.offset();
+                            offset.y = to;
+                            scroll.set_offset(offset);
+                            animating = true;
+                        }
+                    }
+                    None => {
+                        if scroll_into_view(&scroll, caret, lh) {
+                            animating = true;
+                        }
+                    }
+                }
+            }
+        }
+        self.editor.update(cx, |editor, _| {
+            if wants_autoscroll {
+                editor.autoscroll = false;
+                editor.jump_request = None;
+            }
+            editor.scroll_anim = glide;
+            editor.arrive_tint = arrive;
+        });
         if animating {
             window.request_animation_frame();
         }

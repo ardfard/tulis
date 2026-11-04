@@ -1,14 +1,15 @@
 //! The paragraph version swap: a tint marks the paragraph, the old text fades out (ease-in),
 //! the new text fades in (ease-out), then the tint holds and fades. Hovering a version bar or
-//! its dots fades the same tint in as a preview.
+//! its dots fades the same tint in as a preview. Jumps the app makes for you glide to their
+//! place and land under the same tint.
 
 use std::time::{Duration, Instant};
 
-use gpui::Context;
+use gpui::{Context, Pixels};
 use tulis_core::{ParaId, Paragraph};
 
 use super::Editor;
-use crate::motion::{self, BASE, FAST, HOLD};
+use crate::motion::{self, BASE, FAST, HOLD, SLOW};
 
 /// A version swap in progress.
 #[derive(Clone, Debug)]
@@ -49,6 +50,38 @@ impl Swap {
     }
 }
 
+/// A jump gliding from one scroll offset to another (`motion::SLOW`, ease-out).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ScrollAnim {
+    pub from: Pixels,
+    pub to: Pixels,
+    pub start: Instant,
+    /// The offset set last frame; anything else means the user scrolled, which ends the glide.
+    pub last: Pixels,
+}
+
+impl ScrollAnim {
+    pub fn offset_at(&self, now: Instant) -> Pixels {
+        let p = motion::ease_out(motion::progress(self.start, Duration::ZERO, SLOW, now));
+        self.from + (self.to - self.from) * p
+    }
+
+    pub fn done(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.start) >= SLOW
+    }
+}
+
+/// The tint on where a jump lands: in with the scroll, held, then faded like a swap's.
+pub(crate) fn arrive_tint_alpha(start: Instant, now: Instant) -> f32 {
+    let fade_in = motion::ease_out(motion::progress(start, Duration::ZERO, FAST, now));
+    let fade_out = motion::ease_in(motion::progress(start, SLOW + HOLD, BASE, now));
+    fade_in * (1. - fade_out)
+}
+
+pub(crate) fn arrive_tint_done(start: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(start) >= SLOW + HOLD + BASE
+}
+
 /// Hovering a paragraph's version bar or dots.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct VersionHover {
@@ -79,9 +112,22 @@ impl Editor {
         });
     }
 
+    /// The next scroll to the caret is a jump to paragraph `para` the app makes for you: it
+    /// glides there and tints where it lands.
+    pub(crate) fn smooth_jump(&mut self, para: usize) {
+        self.jump_request = Some(para);
+    }
+
     /// A key was pressed: every running animation jumps to its end state.
     pub(crate) fn settle_motion(&mut self, cx: &mut Context<Self>) {
-        if self.swap.take().is_some() | self.lab_arrived.take().is_some() {
+        let mut settled = self.swap.take().is_some() | self.lab_arrived.take().is_some();
+        if let Some(anim) = self.scroll_anim.take() {
+            let mut offset = self.scroll.offset();
+            offset.y = anim.to;
+            self.scroll.set_offset(offset);
+            settled = true;
+        }
+        if settled | self.arrive_tint.take().is_some() {
             cx.notify();
         }
     }

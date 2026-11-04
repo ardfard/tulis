@@ -846,6 +846,7 @@ impl Editor {
             },
             cx,
         );
+        self.smooth_jump(para);
     }
 
     /// `y`/Enter (`cut`) ghosts the walk's current cut, as its own undo step; `n`/Backspace
@@ -1272,6 +1273,7 @@ impl Editor {
             }
         }
         self.set_selection(Selection::caret(DocPos::new(at.0, at.1)), cx);
+        self.smooth_jump(at.0);
     }
 
     pub(super) fn next_mark(&mut self, _: &NextMark, _: &mut Window, cx: &mut Context<Self>) {

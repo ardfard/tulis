@@ -185,6 +185,10 @@ impl Editor {
                 let goal = self.goal_x;
                 let target = self.motion_target(head, motion, count);
                 self.move_to(target, false, cx);
+                // `{` / `}` past the edge of the page glide there.
+                if matches!(motion, Motion::ParagraphForward | Motion::ParagraphBackward) {
+                    self.smooth_jump(target.para);
+                }
                 if matches!(motion, Motion::Up | Motion::Down) {
                     self.goal_x = goal.or_else(|| self.current_layout().map(|l| l.x_for(head)));
                 }

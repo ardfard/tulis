@@ -7,6 +7,7 @@ use gpui::{
     ClipboardItem, Context, Div, FontWeight, Hsla, IntoElement, ParentElement, RenderOnce,
     Stateful, Styled, Window, div, hsla, point, prelude::*, px,
 };
+use gpui_component::WindowExt;
 use gpui_component::popover::Popover;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{Icon, IconName, Selectable};
@@ -89,6 +90,7 @@ impl Workspace {
             .left_0()
             .right_0()
             .bottom(px(FOOTER_HEIGHT + TOAST_GAP))
+            .opacity(self.chrome_opacity)
             .px(px(20.))
             .flex()
             .flex_col()
@@ -129,6 +131,30 @@ impl Workspace {
     pub(crate) fn typed(&mut self, cx: &mut Context<Self>) {
         self.header_dim.on_key(Instant::now());
         self.schedule_dim_repaint(cx);
+    }
+
+    /// Fade the chrome out while typing dims it, unless an overlay is open; back otherwise.
+    pub(crate) fn update_chrome_opacity(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        let editor = self.editor.read(cx);
+        let page_overlay = editor.alt_session.is_some() || editor.lab_bar().is_some();
+        let overlay_open = page_overlay
+            || self.show_overflow
+            || self.lab_open
+            || self.share_open
+            || self.preview
+            || (window.root::<gpui_component::Root>().flatten().is_some()
+                && window.has_active_dialog(cx));
+        let dimmed = self.header_dim.is_dimmed(now) && !overlay_open;
+        if cx.reduce_motion() {
+            self.chrome_opacity = if dimmed { 0. } else { 1. };
+            return;
+        }
+        self.chrome_fade.set(dimmed, now);
+        self.chrome_opacity = self.chrome_fade.opacity(now);
+        if self.chrome_fade.fading(now) {
+            window.request_animation_frame();
+        }
     }
 
     fn schedule_dim_repaint(&mut self, cx: &mut Context<Self>) {
@@ -188,7 +214,6 @@ impl Workspace {
             .map(file_name)
             .unwrap_or_else(|| "Untitled".into());
         let status = self.header_status(cx);
-        let dimmed = self.header_dim.is_dimmed(Instant::now());
         let badge = |label: String| {
             div()
                 .px(px(7.))
@@ -308,17 +333,7 @@ impl Workspace {
                             })),
                     ),
             );
-        if dimmed {
-            header
-                .with_animation(
-                    "header-dim",
-                    Animation::new(crate::motion::SLOW),
-                    |el, progress| el.opacity(1. - progress),
-                )
-                .into_any_element()
-        } else {
-            header.into_any_element()
-        }
+        header.opacity(self.chrome_opacity)
     }
 
     /// Keep the window title in step with the file name and unsaved state.
@@ -510,6 +525,7 @@ impl Workspace {
         let workspace = cx.entity();
         div()
             .id("footer")
+            .opacity(self.chrome_opacity)
             .h(px(FOOTER_HEIGHT))
             .flex_none()
             .px(px(20.))

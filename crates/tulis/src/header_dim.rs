@@ -1,7 +1,9 @@
-//! Auto-dim for the header: it fades out after 2s of continuous typing and comes back when
-//! typing pauses for 2s or the mouse moves.
+//! Auto-dim for the chrome (header, footer, toasts): it fades out after 2s of continuous typing
+//! and comes back when typing pauses for 2s or the mouse moves.
 
 use std::time::{Duration, Instant};
+
+use crate::motion;
 
 pub const DIM_AFTER: Duration = Duration::from_secs(2);
 
@@ -54,8 +56,80 @@ impl HeaderDim {
     }
 }
 
+/// The chrome's opacity as it fades between shown and dimmed: out over `motion::SLOW`
+/// (ease-in), back over `motion::BASE` (ease-out), from wherever it was.
+#[derive(Clone, Copy, Debug)]
+pub struct ChromeFade {
+    dimmed: bool,
+    since: Instant,
+    from: f32,
+}
+
+impl Default for ChromeFade {
+    fn default() -> Self {
+        Self {
+            dimmed: false,
+            since: Instant::now(),
+            from: 1.,
+        }
+    }
+}
+
+impl ChromeFade {
+    /// Head toward `dimmed` (a change restarts the fade from the current opacity).
+    pub fn set(&mut self, dimmed: bool, now: Instant) {
+        if dimmed != self.dimmed {
+            *self = Self {
+                dimmed,
+                since: now,
+                from: self.opacity(now),
+            };
+        }
+    }
+
+    pub fn opacity(&self, now: Instant) -> f32 {
+        if self.dimmed {
+            let p = motion::progress(self.since, Duration::ZERO, motion::SLOW, now);
+            self.from * (1. - motion::ease_in(p))
+        } else {
+            let p = motion::progress(self.since, Duration::ZERO, motion::BASE, now);
+            self.from + (1. - self.from) * motion::ease_out(p)
+        }
+    }
+
+    /// Still fading (another frame is needed).
+    pub fn fading(&self, now: Instant) -> bool {
+        let duration = if self.dimmed {
+            motion::SLOW
+        } else {
+            motion::BASE
+        };
+        now.saturating_duration_since(self.since) < duration
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chrome_fades_out_slowly_and_back_quickly_from_where_it_was() {
+        let start = Instant::now();
+        let at = |ms| start + Duration::from_millis(ms);
+        let mut fade = ChromeFade::default();
+        fade.set(true, at(0));
+        assert_eq!(fade.opacity(at(0)), 1.);
+        assert!(fade.fading(at(399)) && !fade.fading(at(400)));
+        assert!(fade.opacity(at(400)).abs() < 1e-3);
+        fade.set(true, at(500));
+        assert!(fade.opacity(at(500)).abs() < 1e-3);
+        // Back, from halfway through a fade out.
+        let mut fade = ChromeFade::default();
+        fade.set(true, at(0));
+        let mid = fade.opacity(at(200));
+        fade.set(false, at(200));
+        assert!((fade.opacity(at(200)) - mid).abs() < 1e-3);
+        assert!((fade.opacity(at(400)) - 1.).abs() < 1e-3);
+    }
+
     use super::*;
 
     fn ms(n: u64) -> Duration {
