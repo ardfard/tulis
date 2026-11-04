@@ -11,7 +11,9 @@ use gpui::{
 use gpui_component::input::{InputEvent, Textarea, TextareaState};
 
 use crate::actions::{FocusOverflow, FocusPage, OverflowCopy, OverflowUse};
+use crate::commands;
 use crate::editor::Editor;
+use crate::pills;
 use crate::theme::Theme;
 use crate::workspace::Workspace;
 
@@ -351,11 +353,19 @@ impl Render for Scratchpad {
             .children(grip.map(|grip| self.render_grip(grip, t, cx)))
             .child(
                 div()
+                    .debug_selector(|| "overflow-hint".into())
                     .px_3()
                     .py_2()
-                    .text_xs()
-                    .text_color(t.text_muted)
-                    .child("ctrl+↵ or drag into the page to use"),
+                    .child(pills::hint_row(
+                        [(
+                            commands::command_pills("overflow_use")
+                                .get(..1)
+                                .unwrap_or_default(),
+                            "or drag into the page to use",
+                        )],
+                        12.,
+                        &t,
+                    )),
             )
     }
 }

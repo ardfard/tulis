@@ -3,14 +3,13 @@
 use std::time::Instant;
 
 use gpui::{
-    Anchor, Animation, AnimationExt, AnyView, App, ClickEvent, ClipboardItem, Context, Div,
-    FontWeight, Hsla, IntoElement, ParentElement, RenderOnce, Stateful, Styled, Window, div,
-    prelude::*, px,
+    Anchor, Animation, AnimationExt, AnyElement, AnyView, App, BoxShadow, ClickEvent,
+    ClipboardItem, Context, Div, FontWeight, Hsla, IntoElement, ParentElement, RenderOnce,
+    Stateful, Styled, Window, div, hsla, point, prelude::*, px,
 };
-use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::popover::Popover;
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{Icon, IconName, Selectable, Sizable};
+use gpui_component::{Icon, IconName, Selectable};
 use tulis_core::alternates::AltLevel;
 use tulis_core::share::{self, ShareTarget};
 use tulis_core::stats;
@@ -23,6 +22,7 @@ use crate::actions::{
 use crate::assets;
 use crate::commands;
 use crate::lab_popover::LabButton;
+use crate::pills;
 use crate::theme::Theme;
 use crate::toast::TOAST_FADE;
 use crate::workspace::{Workspace, file_name};
@@ -72,33 +72,39 @@ fn header_toggle(id: &'static str, name: IconName, on: bool, t: &Theme) -> State
         .child(icon(name, 15., if on { t.accent } else { t.text_muted }))
 }
 
-/// Distance of the toast stack from the window's bottom edge (above the footer).
-const TOAST_BOTTOM: f32 = 56.;
+/// Space between the footer and the toasts, and between toasts.
+const TOAST_GAP: f32 = 12.;
+/// The Lab bar card: its width, and its distance above the footer (toasts sit above it).
+const LAB_BAR_WIDTH: f32 = 660.;
+const LAB_BAR_GAP: f32 = 15.;
 
 impl Workspace {
-    /// Toasts, centered above the bottom edge, newest last.
-    pub(crate) fn render_toasts(&self, cx: &App) -> impl IntoElement {
+    /// What floats above the footer, centered: the toasts (newest last), then the Lab bar.
+    pub(crate) fn render_bottom_overlays(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let lab_bar = self.render_lab_bar(cx);
         let editor = self.editor.read(cx);
         let t = editor.theme;
         div()
             .absolute()
             .left_0()
             .right_0()
-            .bottom(px(TOAST_BOTTOM))
+            .bottom(px(FOOTER_HEIGHT + TOAST_GAP))
+            .px(px(20.))
             .flex()
             .flex_col()
             .items_center()
-            .gap_1()
+            .gap(px(8.))
             .children(editor.toasts.iter().map(|toast| {
                 div()
                     .id(("toast", toast.id))
-                    .px_3()
-                    .py_1()
-                    .rounded_md()
+                    .px(px(16.))
+                    .py(px(10.))
+                    .rounded(px(10.))
                     .bg(t.panel)
                     .border_1()
                     .border_color(t.rule)
-                    .text_xs()
+                    .text_size(px(14.))
+                    .line_height(px(17.))
                     .text_color(t.text)
                     .child(toast.text.clone())
                     // Solid (no per-frame redraw) until the fade begins.
@@ -115,6 +121,7 @@ impl Workspace {
                         }
                     })
             }))
+            .children(lab_bar)
     }
 
     /// Called when the editor reports typing: track the burst and schedule the repaint that
@@ -369,52 +376,114 @@ impl Workspace {
         self.share(ShareTarget::LinkedIn, cx);
     }
 
-    /// The Lab bar above the footer: what the Lab is showing, with its buttons.
-    pub(crate) fn render_lab_bar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    /// The Lab bar, a card floating above the footer: what the Lab is showing, its keys and
+    /// its buttons.
+    fn render_lab_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let editor = self.editor.read(cx);
         let t = editor.theme;
         let bar = editor.lab_bar()?;
+        let keys = bar.keys;
         Some(
             div()
-                .id("lab-bar")
-                .debug_selector(|| "lab-bar".into())
-                .flex_none()
-                .px_4()
-                .py_1()
+                .w_full()
                 .flex()
-                .flex_row()
-                .items_center()
-                .gap_3()
-                .border_t_1()
-                .border_color(t.rule)
-                .bg(t.panel)
-                .text_xs()
+                .justify_center()
+                .pt(px(LAB_BAR_GAP - TOAST_GAP))
                 .child(
                     div()
-                        .flex_1()
-                        .min_w(px(0.))
+                        .id("lab-bar")
+                        .debug_selector(|| "lab-bar".into())
+                        .occlude()
+                        .w(px(LAB_BAR_WIDTH))
+                        .max_w_full()
+                        .px(px(18.))
+                        .py(px(14.))
                         .flex()
                         .flex_col()
-                        .child(div().text_color(t.text).child(bar.title))
-                        .children(
-                            bar.hint
-                                .map(|hint| div().text_color(t.text_muted).child(hint)),
+                        .gap(px(6.))
+                        .rounded(px(12.))
+                        .border_1()
+                        .border_color(t.rule)
+                        .bg(t.panel)
+                        .shadow(vec![BoxShadow {
+                            color: hsla(0., 0., 0., 0.33),
+                            offset: point(px(0.), px(8.)),
+                            blur_radius: px(22.),
+                            spread_radius: px(0.),
+                            inset: false,
+                        }])
+                        .text_size(px(14.))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .flex_wrap()
+                                .items_center()
+                                .gap_x(px(10.))
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(t.text)
+                                        .child(bar.title),
+                                )
+                                .children(
+                                    bar.detail
+                                        .map(|detail| div().text_color(t.accent).child(detail)),
+                                ),
+                        )
+                        .when(!keys.is_empty(), |d| {
+                            d.child(pills::hint_row(
+                                keys.iter().map(|(keys, label)| (keys.as_slice(), *label)),
+                                12.,
+                                &t,
+                            ))
+                        })
+                        .children(bar.hint.map(|hint| {
+                            div()
+                                .text_size(px(13.))
+                                .text_color(t.text_muted)
+                                .child(hint)
+                        }))
+                        .child(
+                            div()
+                                .pt(px(4.))
+                                .flex()
+                                .flex_row()
+                                .gap(px(8.))
+                                .text_size(px(13.))
+                                .children(bar.actions.into_iter().map(|action| {
+                                    div()
+                                        .id(action.id())
+                                        .debug_selector(move || format!("lab-bar-{}", action.id()))
+                                        .px(px(14.))
+                                        .py(px(7.))
+                                        .rounded(px(8.))
+                                        .cursor_pointer()
+                                        .map(|d| {
+                                            if action.primary() {
+                                                d.bg(t.accent)
+                                                    .text_color(t.background)
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .hover(|d| d.opacity(0.9))
+                                            } else {
+                                                d.border_1()
+                                                    .border_color(t.rule)
+                                                    .text_color(t.text)
+                                                    .hover(|d| d.bg(t.rule))
+                                            }
+                                        })
+                                        .child(action.label())
+                                        .on_click(cx.listener(
+                                            move |ws, _: &ClickEvent, window, cx| {
+                                                ws.editor
+                                                    .update(cx, |e, cx| e.bar_action(action, cx));
+                                                window.focus(&ws.main_focus(cx), cx);
+                                            },
+                                        ))
+                                })),
                         ),
                 )
-                .children(bar.actions.into_iter().map(|action| {
-                    div()
-                        .debug_selector(move || format!("lab-bar-{}", action.id()))
-                        .child(
-                            Button::new(action.id())
-                                .ghost()
-                                .xsmall()
-                                .label(action.label())
-                                .on_click(cx.listener(move |ws, _: &ClickEvent, window, cx| {
-                                    ws.editor.update(cx, |e, cx| e.bar_action(action, cx));
-                                    window.focus(&ws.main_focus(cx), cx);
-                                })),
-                        )
-                })),
+                .into_any_element(),
         )
     }
 

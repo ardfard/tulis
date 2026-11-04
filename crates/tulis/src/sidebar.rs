@@ -2,22 +2,51 @@
 //! the editor's `AltSession` describes.
 
 use gpui::{
-    App, ClickEvent, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
-    Styled, Subscription, WeakEntity, Window, div, prelude::*, px,
+    App, ClickEvent, Context, Entity, FocusHandle, Focusable, FontWeight, IntoElement,
+    ParentElement, Render, Styled, Subscription, WeakEntity, Window, div, prelude::*, px,
 };
 use gpui_component::Sizable;
 use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::tab::{Tab, TabBar};
 
 use crate::actions::{
     AiAlternates, AltFocusInput, AltKeep, AltNext, AltPrev, AltRemove, CloseAlternates, Redo, Undo,
 };
+use crate::commands;
 use crate::editor::{Editor, Scope};
+use crate::pills;
 use crate::workspace::Workspace;
 
 pub const SIDEBAR_WIDTH: f32 = 240.;
-/// Shown under the sidebar's text field so the list keys are discoverable.
-pub const KEY_HINT: &str = "j/k preview · ↵ keep · ⌫ remove · esc close";
+/// Shown under the sidebar's text field so the list keys are discoverable: (command ids, the
+/// index of the key to show, what it does), in two rows.
+const KEY_HINT: [&[(&[(&str, usize)], &str)]; 2] = [
+    &[
+        (&[("alt_next", 1), ("alt_prev", 1)], "preview"),
+        (&[("alt_keep", 0)], "keep"),
+    ],
+    &[
+        (&[("alt_remove", 0)], "remove"),
+        (&[("close_alternates", 0)], "close"),
+    ],
+];
+
+/// The key hint rows' pills and labels, from the command table.
+fn key_hint() -> Vec<Vec<(Vec<String>, &'static str)>> {
+    KEY_HINT
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|(keys, label)| {
+                    let pills = keys
+                        .iter()
+                        .filter_map(|(id, ix)| commands::command_pills(id).get(*ix).cloned())
+                        .collect();
+                    (pills, *label)
+                })
+                .collect()
+        })
+        .collect()
+}
 
 pub struct AltSidebar {
     editor: Entity<Editor>,
@@ -168,23 +197,23 @@ impl Render for AltSidebar {
         };
         let rows = editor.alt_rows();
         let font = editor.font_family.clone();
-        let editor_handle = self.editor.clone();
-        let tabs = TabBar::new("alt-tabs")
-            .underline()
-            .small()
-            .selected_index(session.scope.index())
-            .children(Scope::ALL.map(|scope| {
-                Tab::new().child(
-                    div()
-                        .font_family(crate::theme::SCRIPT_FONT)
-                        .text_size(px(crate::theme::SCRIPT_SIZE))
-                        .text_color(t.accent)
-                        .child(Self::tab_label(scope, session.selection)),
-                )
-            }))
-            .on_click(move |ix: &usize, _, cx: &mut App| {
-                editor_handle.update(cx, |e, cx| e.set_alt_scope(Scope::ALL[*ix], cx));
-            });
+        let tabs = div().flex().flex_row().gap(px(16.)).pb(px(6.)).children(
+            Scope::ALL.into_iter().enumerate().map(|(ix, scope)| {
+                let selected = scope == session.scope;
+                div()
+                    .id(("alt-tab", ix))
+                    .cursor_pointer()
+                    .font_family(crate::theme::SCRIPT_FONT)
+                    .text_size(px(crate::theme::SCRIPT_SIZE))
+                    .text_color(if selected { t.accent } else { t.text_muted })
+                    .when(selected, |d| d.font_weight(FontWeight::BOLD))
+                    .when(!selected, |d| d.hover(|d| d.text_color(t.text)))
+                    .child(Self::tab_label(scope, session.selection))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.editor.update(cx, |e, cx| e.set_alt_scope(scope, cx));
+                    }))
+            }),
+        );
         div()
             .id("alt-sidebar")
             .key_context("AltSidebar")
@@ -200,8 +229,11 @@ impl Render for AltSidebar {
             .border_r_1()
             .border_color(t.rule)
             .bg(t.panel)
-            .text_sm()
-            .child(div().px_2().pt_2().child(tabs))
+            .px(px(14.))
+            .py(px(18.))
+            .gap(px(12.))
+            .text_size(px(13.))
+            .child(tabs)
             .child(
                 div()
                     .id("alt-list")
@@ -215,7 +247,6 @@ impl Render for AltSidebar {
                     .flex_initial()
                     .min_h(px(0.))
                     .overflow_y_scroll()
-                    .p_2()
                     .flex()
                     .flex_col()
                     .gap(px(12.))
@@ -268,14 +299,13 @@ impl Render for AltSidebar {
                             })
                     })),
             )
-            .child(div().px_2().child(Input::new(&self.input).small()))
+            .child(Input::new(&self.input).small())
             .child(
                 div()
                     .id("alt-ask-ai")
-                    .m_2()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
+                    .px(px(10.))
+                    .py(px(8.))
+                    .rounded(px(6.))
                     .cursor_pointer()
                     .text_color(t.ai_accent)
                     .hover(|d| d.bg(t.selection))
@@ -286,11 +316,17 @@ impl Render for AltSidebar {
             )
             .child(
                 div()
-                    .px_3()
-                    .pb_3()
-                    .text_xs()
-                    .text_color(t.text_muted)
-                    .child(KEY_HINT),
+                    .debug_selector(|| "alt-key-hint".into())
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .children(key_hint().iter().map(|row| {
+                        pills::hint_row(
+                            row.iter().map(|(keys, label)| (keys.as_slice(), *label)),
+                            pills::PILL_SIZE,
+                            &t,
+                        )
+                    })),
             )
             .into_any_element()
     }

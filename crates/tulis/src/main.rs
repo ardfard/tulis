@@ -7,6 +7,8 @@ mod editor;
 mod header_dim;
 mod keymap;
 mod lab_popover;
+mod pills;
+mod prompt;
 mod runs;
 mod scratchpad;
 mod sidebar;
@@ -30,6 +32,7 @@ fn main() {
         .run(move |cx: &mut App| {
             gpui_component::init(cx);
             theme::register_fonts(cx);
+            cx.set_prompt_builder(prompt::build);
             let (config, warning) = Config::load(Config::default_path().as_deref());
             keymap::bind(cx);
             let bounds = Bounds::centered(None, size(px(1100.), px(820.)), cx);

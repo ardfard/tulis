@@ -249,13 +249,21 @@ fn bar_title(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Option<Stri
     editor.read_with(cx, |e, _| e.lab_bar().map(|bar| bar.title))
 }
 
+/// The title and, after it, the detail.
+fn bar_headline(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Option<String> {
+    editor.read_with(cx, |e, _| {
+        e.lab_bar()
+            .map(|bar| format!("{} {}", bar.title, bar.detail.unwrap_or_default()))
+    })
+}
+
 #[gpui::test]
 fn the_bar_counts_words_before_and_after_the_active_cuts(cx: &mut TestAppContext) {
     let (editor, cx) = editor_with(cx, &["I really love tea.", "It is very, very good."]);
     assert_eq!(bar_title(&editor, cx), None);
     preview(&editor, cx, &[(0, 2..9), (1, 6..12)]);
     assert_eq!(
-        bar_title(&editor, cx).as_deref(),
+        bar_headline(&editor, cx).as_deref(),
         Some("Slight trim 9 → 7 words · −22%")
     );
     let bar = editor.read_with(cx, |e, _| e.lab_bar()).unwrap();
@@ -270,7 +278,7 @@ fn the_bar_counts_words_before_and_after_the_active_cuts(cx: &mut TestAppContext
     // A kept cut counts again.
     editor.update(cx, |e, cx| assert!(e.toggle_cut_at(DocPos::new(0, 4), cx)));
     assert_eq!(
-        bar_title(&editor, cx).as_deref(),
+        bar_headline(&editor, cx).as_deref(),
         Some("Slight trim 9 → 8 words · −11%")
     );
 }
@@ -365,9 +373,12 @@ fn walking_through_cuts_or_keeps_each_cut_in_turn(cx: &mut TestAppContext) {
     editor.update(cx, |e, cx| e.bar_action(BarAction::Walk, cx));
     assert_eq!(bar_title(&editor, cx).as_deref(), Some("Cut 1 of 3"));
     let bar = editor.read_with(cx, |e, _| e.lab_bar()).unwrap();
+    let labels: Vec<_> = bar.keys.iter().map(|(_, label)| *label).collect();
+    assert_eq!(labels, vec!["cut", "keep", "stop"]);
+    assert_eq!(bar.keys[0].0, vec!["y".to_string(), "↵".to_string()]);
     assert_eq!(
-        bar.hint.as_deref(),
-        Some("y or Enter cuts it · n or Backspace keeps it · Esc stops")
+        bar.actions,
+        vec![BarAction::Cut, BarAction::Keep, BarAction::Stop]
     );
     // The current cut is selected (and scrolled to).
     assert_eq!(
@@ -433,9 +444,9 @@ fn the_bar_recounts_words_only_when_the_document_or_preview_changed(cx: &mut Tes
     let recounts = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
         editor.read_with(cx, |e, _| e.bar_recounts.get())
     };
-    let title = bar_title(&editor, cx);
+    let title = bar_headline(&editor, cx);
     assert_eq!(title.as_deref(), Some("Slight trim 9 → 6 words · −33%"));
-    assert_eq!(bar_title(&editor, cx), title);
+    assert_eq!(bar_headline(&editor, cx), title);
     assert_eq!(recounts(&editor, cx), 1);
     // A document edit recounts.
     editor.update(cx, |e, _| {
@@ -443,7 +454,7 @@ fn the_bar_recounts_words_only_when_the_document_or_preview_changed(cx: &mut Tes
     });
     type_str(&editor, cx, " now");
     assert_eq!(
-        bar_title(&editor, cx).as_deref(),
+        bar_headline(&editor, cx).as_deref(),
         Some("Slight trim 10 → 8 words · −20%")
     );
     assert_eq!(recounts(&editor, cx), 2);
@@ -453,12 +464,12 @@ fn the_bar_recounts_words_only_when_the_document_or_preview_changed(cx: &mut Tes
         assert!(e.toggle_cut_at(DocPos::new(0, 4), cx));
     });
     assert_eq!(
-        bar_title(&editor, cx).as_deref(),
+        bar_headline(&editor, cx).as_deref(),
         Some("Slight trim 10 → 9 words · −10%")
     );
     assert_eq!(recounts(&editor, cx), 3);
     assert_eq!(
-        bar_title(&editor, cx).as_deref(),
+        bar_headline(&editor, cx).as_deref(),
         Some("Slight trim 10 → 9 words · −10%")
     );
     assert_eq!(recounts(&editor, cx), 3);
@@ -475,7 +486,7 @@ fn escape_stops_the_walk_and_leaves_the_rest_of_the_preview(cx: &mut TestAppCont
     assert!(preview.walk.is_none());
     assert!(!preview.is_active(0) && preview.is_active(1));
     assert_eq!(
-        bar_title(&editor, cx).as_deref(),
+        bar_headline(&editor, cx).as_deref(),
         Some("Slight trim 5 → 4 words · −20%")
     );
     // `y` and `n` are text again.
@@ -521,7 +532,8 @@ fn the_long_sentence_check_marks_locally(cx: &mut TestAppContext) {
         )]
     );
     let bar = editor.read_with(cx, |e, _| e.lab_bar()).unwrap();
-    assert_eq!(bar.title, "1 marked · long sentences");
+    assert_eq!(bar.title, "1 marked");
+    assert_eq!(bar.detail.as_deref(), Some("long sentences"));
     assert_eq!(bar.actions, vec![BarAction::Clear]);
     // Clear removes the marks.
     editor.update(cx, |e, cx| e.bar_action(BarAction::Clear, cx));
@@ -554,8 +566,8 @@ fn ai_mark_checks_locate_exact_text_and_drop_invented_text(cx: &mut TestAppConte
         ]
     );
     assert_eq!(
-        bar_title(&editor, cx).as_deref(),
-        Some("2 marked · hedges and filler")
+        bar_headline(&editor, cx).as_deref(),
+        Some("2 marked hedges and filler")
     );
     // The tone check sends an excerpt of the whole document along.
     let mock = self::mock(&editor, cx, &["[]"]);
@@ -673,8 +685,8 @@ fn fixes_become_ai_alternates_in_one_undo_step(cx: &mut TestAppContext) {
         assert!(e.doc.paragraphs[0].segments()[0].active_is_ai());
     });
     assert_eq!(
-        bar_title(&editor, cx).as_deref(),
-        Some("2 fixes proposed — Alt+↑/↓ to compare")
+        bar_headline(&editor, cx).as_deref(),
+        Some("2 fixes proposed Alt+↑/↓ to compare")
     );
     // The original is one Alt+↑ away.
     editor.update(cx, |e, _| e.selection = Selection::caret(DocPos::new(1, 1)));
@@ -788,8 +800,8 @@ fn fixes_inside_one_group_make_one_option(cx: &mut TestAppContext) {
         )
     );
     assert_eq!(
-        bar_title(&editor, cx).as_deref(),
-        Some("3 fixes proposed — Alt+↑/↓ to compare")
+        bar_headline(&editor, cx).as_deref(),
+        Some("3 fixes proposed Alt+↑/↓ to compare")
     );
 }
 
@@ -894,7 +906,7 @@ fn a_cut_partly_inside_an_alternate_is_dropped(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(cut_ranges(&editor, cx), vec![(0, 14..18)]);
     assert_eq!(
-        bar_title(&editor, cx).as_deref(),
+        bar_headline(&editor, cx).as_deref(),
         Some("Slight trim 5 → 4 words · −20%")
     );
     // What the bar counts is what Make the cuts ghosts.

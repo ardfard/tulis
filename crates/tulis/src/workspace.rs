@@ -389,12 +389,35 @@ impl Workspace {
             })
             // The editor's own right-click handler runs first and picks the target.
             .context_menu(move |menu, _, cx| {
-                let ghost = menu_editor.read(cx).ghost_menu_label();
-                menu.action_context(page_focus.clone())
-                    .menu("Alternatives for selection", Box::new(OpenAlternates))
-                    .menu("AI alternatives for selection", Box::new(AiAlternates))
-                    .menu(ghost, Box::new(ToggleGhost))
-                    .menu("Stash this in Overflow", Box::new(SendToOverflow))
+                let editor = menu_editor.read(cx);
+                let (t, font) = (editor.theme, editor.font_family.clone());
+                let items: [(&'static str, &'static str, Box<dyn gpui::Action>); 4] = [
+                    (
+                        "Alternatives for selection",
+                        "alternatives",
+                        Box::new(OpenAlternates),
+                    ),
+                    (
+                        "AI alternatives for selection",
+                        "ai_alternates",
+                        Box::new(AiAlternates),
+                    ),
+                    (
+                        editor.ghost_menu_label(),
+                        "toggle_ghost",
+                        Box::new(ToggleGhost),
+                    ),
+                    ("Stash this in Overflow", "stash", Box::new(SendToOverflow)),
+                ];
+                items.into_iter().fold(
+                    menu.action_context(page_focus.clone()).min_w(px(380.)),
+                    |menu, (label, id, action)| {
+                        let font = font.clone();
+                        menu.menu_element(action, move |_, _| {
+                            context_menu_item(label, id, font.clone(), t)
+                        })
+                    },
+                )
             })
     }
 }
@@ -451,10 +474,48 @@ impl Render for Workspace {
                         row.children(self.scratchpad.clone())
                     }),
             )
-            .children(self.render_lab_bar(cx))
             .child(self.render_footer(cx))
-            .child(self.render_toasts(cx))
+            .child(self.render_bottom_overlays(cx))
     }
+}
+
+/// A context-menu row: its label, then its key pill and vim keys (from the command table).
+fn context_menu_item(
+    label: &'static str,
+    id: &'static str,
+    font: SharedString,
+    t: theme::Theme,
+) -> impl IntoElement {
+    let t = &t;
+    let key = crate::commands::command_pills(id).into_iter().next();
+    let vim = crate::commands::COMMANDS
+        .iter()
+        .find(|c| c.id == id)
+        .and_then(|c| c.vim);
+    div()
+        .w_full()
+        .py(px(5.))
+        .flex()
+        .flex_row()
+        .items_center()
+        .justify_between()
+        .gap(px(16.))
+        .text_size(px(14.))
+        .text_color(t.text)
+        .child(label)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.))
+                .children(key.map(|key| crate::pills::pill(key, crate::pills::PILL_SIZE, t)))
+                .child(
+                    div()
+                        .w(px(16.))
+                        .children(vim.map(|vim| crate::pills::vim_keys(vim, font, t))),
+                ),
+        )
 }
 
 /// Save As appended ".md" to the chosen name and that names an existing file the dialog never
@@ -604,9 +665,14 @@ impl Workspace {
             then(self, window, cx);
             return;
         }
+        let name = self
+            .path
+            .as_deref()
+            .map(file_name)
+            .unwrap_or_else(|| "Untitled".into());
         let answer = window.prompt(
             PromptLevel::Warning,
-            "Save changes to this document?",
+            &format!("Save changes to {name}?"),
             None,
             &["Save", "Don't Save", "Cancel"],
             cx,
@@ -1570,6 +1636,19 @@ mod tests {
         });
         draw(cx);
         assert!(lab_open(&ws, cx));
+    }
+
+    #[gpui::test]
+    fn the_unsaved_changes_prompt_names_the_file(cx: &mut TestAppContext) {
+        let (ws, cx) = root_workspace(cx, &["One."]);
+        ws.update_in(cx, |ws, window, cx| {
+            ws.path = Some(std::path::PathBuf::from("/tmp/notes.md"));
+            ws.editor.update(cx, |e, _| e.dirty = true);
+            ws.new_file(&crate::actions::New, window, cx);
+        });
+        let (message, _) = cx.pending_prompt().expect("a prompt");
+        assert_eq!(message, "Save changes to notes.md?");
+        cx.simulate_prompt_answer("Cancel");
     }
 
     #[gpui::test]

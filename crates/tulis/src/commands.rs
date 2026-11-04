@@ -656,17 +656,31 @@ pub fn key_bindings(cx: &App) -> Vec<KeyBinding> {
 /// `"secondary-k t"` → `"Ctrl+K T"`.
 pub fn key_label(keys: &str) -> String {
     keys.split(' ')
-        .map(|stroke| stroke_parts(stroke).join("+"))
+        .map(|stroke| stroke_parts(stroke, false).join("+"))
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-/// The same keys as drawn in a key pill, spaced instead of joined: `"Ctrl Shift M"`.
+/// The same keys as drawn in a key pill, spaced instead of joined and with symbols for Enter
+/// and Backspace: `"Ctrl Shift M"`, `"Ctrl ↵"`.
 pub fn key_pill(keys: &str) -> String {
+    // A lone letter key (`j`, `y`) is shown as typed.
+    if keys.chars().count() == 1 {
+        return keys.to_string();
+    }
     keys.split(' ')
-        .flat_map(stroke_parts)
+        .flat_map(|stroke| stroke_parts(stroke, true))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Every key of the command with this id, as pills (the cheat sheet joins them with "or").
+pub fn command_pills(id: &str) -> Vec<String> {
+    COMMANDS
+        .iter()
+        .find(|c| c.id == id)
+        .map(|c| c.keys.iter().map(|k| key_pill(k)).collect())
+        .unwrap_or_default()
 }
 
 /// The first (displayed) keys of the command with this id.
@@ -685,7 +699,7 @@ pub fn tooltip(label: &str, id: &str) -> String {
     }
 }
 
-fn stroke_parts(stroke: &str) -> Vec<String> {
+fn stroke_parts(stroke: &str, symbols: bool) -> Vec<String> {
     let parts: Vec<&str> = stroke.split('-').collect();
     // A trailing "-" means the key itself is "-" (e.g. "ctrl--").
     let (mods, key) = match parts.as_slice() {
@@ -712,6 +726,9 @@ fn stroke_parts(stroke: &str) -> Vec<String> {
         "down" => "↓".into(),
         "left" => "←".into(),
         "right" => "→".into(),
+        "enter" if symbols => "↵".into(),
+        "backspace" if symbols => "⌫".into(),
+        "delete" if symbols => "Del".into(),
         "enter" => "Enter".into(),
         "escape" => "Esc".into(),
         "backspace" => "Backspace".into(),
@@ -727,6 +744,8 @@ pub struct CheatRow {
     pub id: &'static str,
     pub label: &'static str,
     pub key: String,
+    /// Every key, as pills (the older bindings after the first).
+    pub pills: Vec<String>,
     pub vim: &'static str,
 }
 
@@ -744,6 +763,7 @@ pub fn cheat_sheet(filter: &str) -> Vec<(Group, Vec<CheatRow>)> {
                     id: c.id,
                     label: c.label,
                     key: c.keys.first().map_or_else(|| "—".into(), |k| key_label(k)),
+                    pills: c.keys.iter().map(|k| key_pill(k)).collect(),
                     vim: c.vim.unwrap_or(""),
                 })
                 .filter(|row| {
@@ -895,6 +915,14 @@ mod tests {
         assert_eq!(key_pill("secondary-shift-a"), format!("{ctrl} Shift A"));
         assert_eq!(key_pill("secondary-k t"), format!("{ctrl} K T"));
         assert_eq!(key_pill("ctrl--"), "Ctrl -");
+        assert_eq!(key_pill("secondary-enter"), format!("{ctrl} ↵"));
+        assert_eq!(key_pill("backspace"), "⌫");
+        assert_eq!(key_pill("j"), "j");
+        assert_eq!(key_label("secondary-enter"), format!("{ctrl}+Enter"));
+        assert_eq!(
+            command_pills("stash"),
+            vec![format!("{ctrl} Shift X"), format!("{ctrl} Shift O")]
+        );
         assert_eq!(command_keys("open_lab"), Some("secondary-l"));
         assert_eq!(
             tooltip("Markers", "toggle_markers"),
@@ -920,6 +948,9 @@ mod tests {
                 .any(|row| row.vim == "gX" && row.label == "Focus page ↔ Overflow")
         );
         assert_eq!(cheat_sheet("linkedin")[0].1[0].key, "—");
+        assert!(cheat_sheet("linkedin")[0].1[0].pills.is_empty());
+        let stash = &cheat_sheet("stash in")[0].1[0];
+        assert_eq!(stash.pills.len(), 2);
         assert_eq!(cheat_sheet("ai alt")[0].1[0].label, "AI alternatives");
         assert!(cheat_sheet("zzzz").is_empty());
     }

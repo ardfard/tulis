@@ -25,10 +25,6 @@ pub enum Scope {
 impl Scope {
     /// Tab order.
     pub const ALL: [Scope; 3] = [Scope::Word, Scope::Sentence, Scope::Paragraph];
-
-    pub fn index(self) -> usize {
-        Self::ALL.iter().position(|&s| s == self).unwrap_or(0)
-    }
 }
 
 /// An open sidebar.

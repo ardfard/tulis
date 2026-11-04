@@ -16,6 +16,7 @@ use tulis_core::{AiKind, DocPos, ParaId, Paragraph, Selection, Source};
 
 use super::{Editor, EditorEvent};
 use crate::actions::{NextMark, PrevMark};
+use crate::commands;
 
 /// The Lab bar's cached counts, with the state they were computed from: (edit revision,
 /// preview revision, level, cut count) and (words before, words after).
@@ -252,6 +253,10 @@ pub enum BarAction {
     Walk,
     Done,
     Clear,
+    /// During a walk: cut, keep or stop walking.
+    Cut,
+    Keep,
+    Stop,
 }
 
 impl BarAction {
@@ -261,6 +266,9 @@ impl BarAction {
             BarAction::Walk => "Walk through",
             BarAction::Done => "Done",
             BarAction::Clear => "Clear",
+            BarAction::Cut => "Cut",
+            BarAction::Keep => "Keep",
+            BarAction::Stop => "Stop",
         }
     }
 
@@ -271,14 +279,28 @@ impl BarAction {
             BarAction::Walk => "walk",
             BarAction::Done => "done",
             BarAction::Clear => "clear",
+            BarAction::Cut => "cut",
+            BarAction::Keep => "keep",
+            BarAction::Stop => "stop",
         }
+    }
+
+    /// The bar's first button is drawn filled.
+    pub fn primary(self) -> bool {
+        matches!(self, BarAction::MakeCuts | BarAction::Cut)
     }
 }
 
 /// The bar above the footer while the Lab has something on the page.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LabBar {
+    /// In bold: what the Lab is showing.
     pub title: String,
+    /// In accent, after the title: the counts or the check.
+    pub detail: Option<String>,
+    /// Key pills and what they do.
+    pub keys: Vec<(Vec<String>, &'static str)>,
+    /// A line of plain text under the keys.
     pub hint: Option<String>,
     pub actions: Vec<BarAction>,
 }
@@ -649,45 +671,56 @@ impl Editor {
                 let fixes = self.lab_fixes?;
                 let s = if fixes == 1 { "" } else { "es" };
                 return Some(LabBar {
-                    title: format!("{fixes} fix{s} proposed — Alt+↑/↓ to compare"),
-                    hint: None,
+                    title: format!("{fixes} fix{s} proposed"),
+                    detail: Some("Alt+↑/↓ to compare".into()),
+                    keys: Vec::new(),
+                    hint: Some("Fixes are alternates: the original is one cycle away.".into()),
                     actions: vec![BarAction::Clear],
                 });
             };
             let head = self.selection.head;
             let note = self.mark_at(head).map(|ix| self.marks[ix].note.clone());
+            let pills = |id| commands::command_pills(id).into_iter().take(1).collect();
             return Some(LabBar {
-                title: format!(
-                    "{} marked · {}",
-                    self.marks.len(),
-                    first.check.short_label()
-                ),
+                title: format!("{} marked", self.marks.len()),
+                detail: Some(first.check.short_label().into()),
+                keys: vec![
+                    (pills("next_mark"), "next"),
+                    (pills("prev_mark"), "previous"),
+                ],
                 hint: note.filter(|note| !note.is_empty()),
                 actions: vec![BarAction::Clear],
             });
         };
-        if let Some(walk) = preview.walk {
-            let decided = walk.cut + walk.kept;
-            let left = (walk.at..preview.cuts.len())
-                .filter(|&ix| preview.is_active(ix))
-                .count();
-            return Some(LabBar {
-                title: format!("Cut {} of {}", decided + 1, decided + left),
-                hint: Some("y or Enter cuts it · n or Backspace keeps it · Esc stops".into()),
-                actions: vec![BarAction::Done],
-            });
-        }
         let (before, after) = self.bar_counts(preview);
         let pct = if before == 0 {
             0
         } else {
             ((before - after.min(before)) as f32 * 100. / before as f32).round() as usize
         };
+        if let Some(walk) = preview.walk {
+            let decided = walk.cut + walk.kept;
+            let left = (walk.at..preview.cuts.len())
+                .filter(|&ix| preview.is_active(ix))
+                .count();
+            // The walk's keys are captured by the editor, not bound in the command table.
+            let pills = |keys: &[&str]| keys.iter().map(|k| commands::key_pill(k)).collect();
+            return Some(LabBar {
+                title: format!("Cut {} of {}", decided + 1, decided + left),
+                detail: Some(format!("{} · −{pct}%", preview.level.label())),
+                keys: vec![
+                    (pills(&["y", "enter"]), "cut"),
+                    (pills(&["n", "backspace"]), "keep"),
+                    (pills(&["escape"]), "stop"),
+                ],
+                hint: None,
+                actions: vec![BarAction::Cut, BarAction::Keep, BarAction::Stop],
+            });
+        }
         Some(LabBar {
-            title: format!(
-                "{} {before} → {after} words · −{pct}%",
-                preview.level.label()
-            ),
+            title: preview.level.label().into(),
+            detail: Some(format!("{before} → {after} words · −{pct}%")),
+            keys: Vec::new(),
             hint: Some("Faded words would go. Click one to keep it.".into()),
             actions: vec![BarAction::MakeCuts, BarAction::Walk, BarAction::Done],
         })
@@ -708,6 +741,11 @@ impl Editor {
                 self.marks.clear();
                 self.lab_fixes = None;
                 cx.notify();
+            }
+            BarAction::Cut => self.walk_step(true, cx),
+            BarAction::Keep => self.walk_step(false, cx),
+            BarAction::Stop => {
+                self.end_walk(cx);
             }
         }
     }

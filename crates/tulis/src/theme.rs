@@ -215,11 +215,12 @@ pub fn resolve_font(configured: &str, installed: &[String], platform_mono: &str)
         .to_string()
 }
 
-/// Make gpui-component's widgets use `theme`'s colors. Does nothing before
-/// `gpui_component::init` (editor tests run without it).
+/// Make gpui-component's widgets (and the in-window prompt) use `theme`'s colors. The widgets
+/// are left alone before `gpui_component::init` (editor tests run without it).
 pub fn apply_to_components(theme: &Theme, cx: &mut App) {
     use gpui_component::{Theme as ComponentTheme, ThemeMode};
 
+    cx.set_global(crate::prompt::ActiveTheme(*theme));
     if !cx.has_global::<ComponentTheme>() {
         return;
     }
