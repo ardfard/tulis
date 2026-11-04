@@ -11,6 +11,7 @@ mod lab;
 mod lab_tests;
 pub mod layout;
 pub(crate) mod markers;
+mod swap;
 #[cfg(test)]
 pub(crate) mod tests;
 mod vim_exec;
@@ -122,6 +123,10 @@ pub struct Editor {
     /// Used instead of the configured provider when set (tests).
     pub provider_override: Option<Arc<dyn LlmProvider>>,
     pub(crate) layout: Option<LayoutCache>,
+    /// A paragraph version swap being animated.
+    pub(crate) swap: Option<swap::Swap>,
+    /// The version bar (or dots) under the pointer, tinting its paragraph.
+    pub(crate) version_hover: Option<swap::VersionHover>,
     /// IME marked text, as a byte range of `doc.flat_text()`.
     pub(crate) marked: Option<Range<usize>>,
     pub(crate) goal_x: Option<Pixels>,
@@ -174,6 +179,8 @@ impl Editor {
             vim,
             alt_edit: None,
             cycled: None,
+            swap: None,
+            version_hover: None,
             alt_session: None,
             ai_task: None,
             ai_cancel: None,
@@ -213,6 +220,8 @@ impl Editor {
         self.history = History::new(HISTORY_LIMIT);
         self.overflow_changed(false);
         self.trim_preview = None;
+        self.swap = None;
+        self.version_hover = None;
         self.marks.clear();
         self.lab_fixes = None;
         self.trim_cache.clear();
@@ -668,8 +677,16 @@ impl Editor {
 impl Render for Editor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .id("editor")
             .key_context("Editor")
             .track_focus(&self.focus_handle)
+            // Typing is never delayed: a key press jumps running animations to their end.
+            .capture_key_down(cx.listener(|e, _: &gpui::KeyDownEvent, _, cx| e.settle_motion(cx)))
+            .on_hover(cx.listener(|e, hovered: &bool, _, cx| {
+                if !*hovered {
+                    e.set_version_hover(None, cx);
+                }
+            }))
             .cursor(CursorStyle::IBeam)
             .w_full()
             .on_action(cx.listener(Self::backspace))

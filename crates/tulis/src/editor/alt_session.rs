@@ -375,7 +375,9 @@ impl Editor {
         }
         let range = match (scope, seg) {
             (Scope::Paragraph, _) => {
+                let old = self.doc.paragraphs[para].clone();
                 self.doc.set_active_version(para, index);
+                self.start_swap(para, old, cx);
                 0..self.doc.paragraphs[para].len()
             }
             (_, Some(seg)) => match self.doc.set_active_option(para, seg, index) {

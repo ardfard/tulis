@@ -411,6 +411,14 @@ impl Editor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let hovered = self.layout.as_ref().and_then(|layout| {
+            layout
+                .version_zones
+                .iter()
+                .find(|(_, zone)| zone.contains(&event.position))
+                .map(|(para, _)| *para)
+        });
+        self.set_version_hover(hovered, cx);
         if !self.is_selecting {
             return;
         }

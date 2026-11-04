@@ -7,6 +7,7 @@ mod editor;
 mod header_dim;
 mod keymap;
 mod lab_popover;
+mod motion;
 mod pills;
 mod prompt;
 mod runs;

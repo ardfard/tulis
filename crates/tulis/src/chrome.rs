@@ -312,7 +312,7 @@ impl Workspace {
             header
                 .with_animation(
                     "header-dim",
-                    Animation::new(std::time::Duration::from_millis(400)),
+                    Animation::new(crate::motion::SLOW),
                     |el, progress| el.opacity(1. - progress),
                 )
                 .into_any_element()

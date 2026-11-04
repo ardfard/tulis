@@ -103,6 +103,9 @@ pub struct LayoutCache {
     pub paras: Vec<ParaLayout>,
     /// Clickable version dots: (paragraph index, version index, window bounds).
     pub version_dots: Vec<(usize, usize, Bounds<Pixels>)>,
+    /// Where hovering previews a paragraph's versions: its bar and dots (paragraph index,
+    /// window bounds).
+    pub version_zones: Vec<(usize, Bounds<Pixels>)>,
 }
 
 impl LayoutCache {
@@ -220,6 +223,7 @@ mod tests {
                 x_offset: px(0.),
             }],
             version_dots: Vec::new(),
+            version_zones: Vec::new(),
         }
     }
 

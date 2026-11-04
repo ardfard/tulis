@@ -127,6 +127,17 @@ pub fn group_box(x0: Pixels, x1: Pixels, line_top: Pixels, line_height: Pixels) 
     )
 }
 
+/// The area around a paragraph's version bar and dots where hovering previews the swap tint.
+pub fn version_zone(text_left: Pixels, para_top: Pixels, height: Pixels) -> Bounds<Pixels> {
+    Bounds::from_corners(
+        point(text_left - px(DOTS_OFFSET + DOT_HIT_WIDTH / 2.), para_top),
+        point(
+            text_left - px(BAR_OFFSET - BAR_WIDTH - 4.),
+            para_top + height,
+        ),
+    )
+}
+
 /// The version dot under `position`, as `(paragraph index, version index)`.
 pub fn version_dot_at(
     dots: &[(usize, usize, Bounds<Pixels>)],

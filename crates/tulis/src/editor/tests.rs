@@ -1836,3 +1836,20 @@ fn wrapped_title_lines_all_start_at_the_column_edge(cx: &mut TestAppContext) {
         }
     });
 }
+
+#[gpui::test]
+fn cycling_a_paragraph_version_starts_a_swap_and_a_key_settles_it(cx: &mut TestAppContext) {
+    let (editor, cx) = editor_with(cx, &["Draft one."]);
+    editor.update(cx, |e, _| {
+        e.doc.add_version(0, "Draft two.".into());
+        e.selection = Selection::caret(DocPos::new(0, 0));
+    });
+    editor.update_in(cx, |e, window, cx| e.cycle_next(&CycleNext, window, cx));
+    let old = editor.read_with(cx, |e, _| e.swap.as_ref().map(|s| s.old.text()));
+    assert_eq!(old.as_deref(), Some("Draft two."));
+    // Any key press jumps the swap to its end.
+    editor.update_in(cx, |e, window, cx| window.focus(&e.focus_handle, cx));
+    cx.simulate_keystrokes("right");
+    assert!(editor.read_with(cx, |e, _| e.swap.is_none()));
+    assert_eq!(texts(&editor, cx), vec!["Draft one."]);
+}

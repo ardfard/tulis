@@ -87,6 +87,7 @@ impl Editor {
             return;
         }
         self.begin_edit(EditKind::Other, head.para..head.para + 1);
+        let old = self.doc.paragraphs[head.para].clone();
         let info = self.doc.cycle(head, forward);
         if let Some(info) = &info {
             let offset = match info.level {
@@ -96,6 +97,12 @@ impl Editor {
             self.selection = Selection::caret(DocPos::new(head.para, offset));
         }
         self.end_edit(cx);
+        if info
+            .as_ref()
+            .is_some_and(|i| i.level == AltLevel::Paragraph)
+        {
+            self.start_swap(head.para, old, cx);
+        }
         self.cycled = info.map(|info| CycledGroup {
             para_id: self.doc.paragraphs[head.para].id,
             range: info.span,

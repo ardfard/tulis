@@ -7,6 +7,8 @@ use gpui::{
     size,
 };
 
+use std::time::Instant;
+
 use super::Editor;
 use super::layout::{LayoutCache, ParaLayout, clamp_px};
 use super::markers::{self, DOT};
@@ -29,6 +31,7 @@ pub struct EditorPrepaint {
     selection: Vec<PaintQuad>,
     markers: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
+    swap: SwapPaint,
 }
 
 impl IntoElement for EditorElement {
@@ -99,6 +102,8 @@ pub(super) fn build_layout(
         )
     });
     let (cuts_by_para, marks_by_para) = editor.lab_ranges_by_para();
+    let now = Instant::now();
+    let mut faded_style;
     let mut top = px(0.);
     let mut paras = Vec::with_capacity(editor.doc.paragraphs.len());
     for (i, p) in editor.doc.paragraphs.iter().enumerate() {
@@ -120,10 +125,13 @@ pub(super) fn build_layout(
             marked_here,
             title_marker,
             caret_on_marker,
-            if paragraph_alpha(editor, p.id, page_dimmed) < 1. {
-                &dimmed
-            } else {
-                &style
+            match paragraph_alpha(editor, p.id, page_dimmed) * swap_alpha(editor, p.id, now) {
+                1. => &style,
+                DIM_ALPHA => &dimmed,
+                alpha => {
+                    faded_style = run_style(editor, alpha);
+                    &faded_style
+                }
             },
         );
         let line = window
@@ -146,8 +154,107 @@ pub(super) fn build_layout(
         line_height: lh,
         paras,
         version_dots: Vec::new(),
+        version_zones: Vec::new(),
     }
 }
+
+/// The text alpha of paragraph `id` during a version swap (1 otherwise).
+fn swap_alpha(editor: &Editor, id: ParaId, now: Instant) -> f32 {
+    match &editor.swap {
+        Some(swap) if swap.para_id == id && !swap.done(now) => swap.new_alpha(now),
+        _ => 1.,
+    }
+}
+
+/// What a version swap (or a hover over a version bar) paints this frame.
+struct SwapPaint {
+    /// The tint behind the paragraph.
+    tint: Option<PaintQuad>,
+    /// The old version fading out, and the area it may paint in.
+    old: Option<(ParaLayout, Bounds<Pixels>)>,
+    /// Another frame is needed.
+    animating: bool,
+}
+
+/// The swap tint, and the old version shaped at its fading alpha, for this frame.
+fn swap_paint(editor: &Editor, layout: &LayoutCache, window: &mut Window) -> SwapPaint {
+    let now = Instant::now();
+    let lh = layout.line_height;
+    let mut out = SwapPaint {
+        tint: None,
+        old: None,
+        animating: false,
+    };
+    let para_bounds = |ix: usize| {
+        let pl = layout.paras.get(ix)?;
+        let top = layout.origin.y + pl.top;
+        Some(Bounds::from_corners(
+            point(layout.origin.x - px(TINT_PAD_X), top - px(TINT_PAD_Y)),
+            point(
+                layout.origin.x + layout.width + px(TINT_PAD_X),
+                top + pl.height(lh) + px(TINT_PAD_Y),
+            ),
+        ))
+    };
+    let mut tint: Option<(usize, f32)> = None;
+    if let Some(swap) = editor.swap.as_ref().filter(|s| !s.done(now))
+        && let Some(ix) = editor.doc.para_index(swap.para_id)
+    {
+        out.animating = true;
+        tint = Some((ix, swap.tint_alpha(now)));
+        if swap.showing_old(now)
+            && let Some(bounds) = para_bounds(ix)
+        {
+            let style = run_style(editor, swap.old_alpha(now));
+            let text = swap.old.text();
+            let title_marker = if ix == 0 { title_marker_len(&text) } else { 0 };
+            let runs = build_runs(
+                text.len(),
+                &swap.old.spans(),
+                &[],
+                &[],
+                None,
+                title_marker,
+                false,
+                &style,
+            );
+            let font_size = px(editor.config.editor.effective_font_size());
+            let line = window
+                .text_system()
+                .shape_text(
+                    text.clone().into(),
+                    font_size,
+                    &runs,
+                    Some(layout.width),
+                    None,
+                )
+                .ok()
+                .and_then(|lines| lines.into_iter().next())
+                .unwrap_or_default();
+            let x_offset = -line
+                .unwrapped_layout
+                .x_for_index(title_marker.min(line.len()));
+            let top = layout.paras[ix].top;
+            out.old = Some((ParaLayout::new(top, line, text.len(), x_offset), bounds));
+        }
+    }
+    if let Some(hover) = editor.version_hover {
+        let alpha = hover.tint_alpha(now);
+        out.animating |= alpha < 1.;
+        if tint.is_none_or(|(ix, a)| ix != hover.para || a < alpha) {
+            tint = Some((hover.para, alpha));
+        }
+    }
+    out.tint = tint.and_then(|(ix, alpha)| {
+        let bounds = para_bounds(ix)?;
+        Some(fill(bounds, faded(editor.theme.rule, alpha)).corner_radii(px(6.)))
+    });
+    out
+}
+
+/// Padding of the swap tint around its paragraph.
+const TINT_PAD_X: f32 = 8.;
+const TINT_PAD_Y: f32 = 4.;
 
 /// Dotted underlines under alternate groups, version bars with their dots (recorded in
 /// `layout.version_dots` for clicks), and the box around a group just cycled.
@@ -185,6 +292,9 @@ pub(super) fn marker_quads(
             let height = pl.height(lh);
             let bar = faded(t.accent, 0.6 * alpha);
             quads.push(fill(markers::version_bar(left, para_top, height), bar));
+            layout
+                .version_zones
+                .push((ix, markers::version_zone(left, para_top, height)));
             let dots = markers::version_dots(left, para_top, lh, p.versions.len(), p.active);
             for (version, (dot, hit)) in dots.into_iter().enumerate() {
                 let color = if version == p.active {
@@ -362,6 +472,7 @@ impl Element for EditorElement {
             }
             fill(Bounds::new(caret, size(width, lh)), color)
         });
+        let swap = swap_paint(editor, &layout, window);
         let wants_autoscroll = editor.autoscroll;
         let caret = layout.window_point(editor.selection.head);
         let scroll = editor.scroll.clone();
@@ -374,11 +485,15 @@ impl Element for EditorElement {
             self.editor
                 .update(cx, |editor, _| editor.autoscroll = false);
         }
+        if swap.animating {
+            window.request_animation_frame();
+        }
         Some(EditorPrepaint {
             layout,
             selection,
             markers,
             cursor,
+            swap,
         })
     }
 
@@ -401,6 +516,9 @@ impl Element for EditorElement {
             ElementInputHandler::new(bounds, self.editor.clone()),
             cx,
         );
+        if let Some(tint) = prepaint.swap.tint {
+            window.paint_quad(tint);
+        }
         for quad in prepaint.selection {
             window.paint_quad(quad);
         }
@@ -408,41 +526,12 @@ impl Element for EditorElement {
         let text_origin = prepaint.layout.origin;
         let width = prepaint.layout.width;
         for para in &prepaint.layout.paras {
-            let top = text_origin.y + para.top;
-            if para.x_offset == px(0.) || para.line_count() == 1 {
-                let origin = point(text_origin.x + para.x_offset, top);
-                para.line
-                    .paint(origin, lh, TextAlign::Left, None, window, cx)
-                    .ok();
-                continue;
-            }
-            // A hanging title: the first line is shifted into the gutter, the rest stay in the
-            // column. Paint the line twice, each pass clipped to its part.
-            let wide = |y: Pixels, h: Pixels| ContentMask {
-                bounds: Bounds::new(
-                    point(text_origin.x - GUTTER, y),
-                    size(width + GUTTER * 2., h),
-                ),
-            };
-            let first = Some(wide(top, lh));
-            let rest = Some(wide(top + lh, para.height(lh) - lh));
-            window.with_content_mask(first, |window| {
-                let origin = point(text_origin.x + para.x_offset, top);
-                para.line
-                    .paint(origin, lh, TextAlign::Left, None, window, cx)
-                    .ok();
-            });
-            window.with_content_mask(rest, |window| {
-                para.line
-                    .paint(
-                        point(text_origin.x, top),
-                        lh,
-                        TextAlign::Left,
-                        None,
-                        window,
-                        cx,
-                    )
-                    .ok();
+            paint_paragraph(para, text_origin, width, lh, window, cx);
+        }
+        // The old version fades out over the new one's place; reflow waits for the swap.
+        if let Some((old, bounds)) = &prepaint.swap.old {
+            window.with_content_mask(Some(ContentMask { bounds: *bounds }), |window| {
+                paint_paragraph(old, text_origin, width, lh, window, cx);
             });
         }
         for quad in prepaint.markers {
@@ -454,7 +543,57 @@ impl Element for EditorElement {
             }
         }
         let layout = prepaint.layout;
-        self.editor
-            .update(cx, |editor, _| editor.layout = Some(layout));
+        self.editor.update(cx, |editor, _| {
+            editor.layout = Some(layout);
+            if editor.swap.as_ref().is_some_and(|s| s.done(Instant::now())) {
+                editor.swap = None;
+            }
+        });
     }
+}
+
+/// Paint one paragraph's wrapped text. A hanging title's first line is shifted into the gutter
+/// and the rest stay in the column, so the line is painted twice, each pass clipped to its part.
+fn paint_paragraph(
+    para: &ParaLayout,
+    text_origin: Point<Pixels>,
+    width: Pixels,
+    lh: Pixels,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let top = text_origin.y + para.top;
+    if para.x_offset == px(0.) || para.line_count() == 1 {
+        let origin = point(text_origin.x + para.x_offset, top);
+        para.line
+            .paint(origin, lh, TextAlign::Left, None, window, cx)
+            .ok();
+        return;
+    }
+    let wide = |y: Pixels, h: Pixels| ContentMask {
+        bounds: Bounds::new(
+            point(text_origin.x - GUTTER, y),
+            size(width + GUTTER * 2., h),
+        ),
+    };
+    let first = Some(wide(top, lh));
+    let rest = Some(wide(top + lh, para.height(lh) - lh));
+    window.with_content_mask(first, |window| {
+        let origin = point(text_origin.x + para.x_offset, top);
+        para.line
+            .paint(origin, lh, TextAlign::Left, None, window, cx)
+            .ok();
+    });
+    window.with_content_mask(rest, |window| {
+        para.line
+            .paint(
+                point(text_origin.x, top),
+                lh,
+                TextAlign::Left,
+                None,
+                window,
+                cx,
+            )
+            .ok();
+    });
 }
