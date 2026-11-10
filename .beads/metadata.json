@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "tulis",
+  "project_id": "2adf4d36-adcd-4dd2-91e2-0bf37c30d985"
+}
