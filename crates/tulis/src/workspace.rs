@@ -793,6 +793,16 @@ mod tests {
     use super::{Workspace, needs_overwrite_confirm};
     use crate::editor::AltEdit;
 
+    // gpui-component binds "move to start/end of input" per platform.
+    #[cfg(target_os = "macos")]
+    const INPUT_START: &str = "cmd-up";
+    #[cfg(target_os = "macos")]
+    const INPUT_END: &str = "cmd-down";
+    #[cfg(not(target_os = "macos"))]
+    const INPUT_START: &str = "ctrl-home";
+    #[cfg(not(target_os = "macos"))]
+    const INPUT_END: &str = "ctrl-end";
+
     #[test]
     fn overwrite_confirm_only_when_md_was_appended_onto_an_existing_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -1114,7 +1124,7 @@ mod tests {
         assert_eq!(scratchpad_value(&ws, cx), "First idea.");
         // Typing in it edits the document's overflow and marks the document dirty.
         focus_scratchpad(&ws, cx);
-        cx.simulate_keystrokes("ctrl-end");
+        cx.simulate_keystrokes(INPUT_END);
         cx.simulate_input(" More.");
         let (overflow, dirty) = ws.read_with(cx, |ws, cx| {
             let e = ws.editor.read(cx);
@@ -1180,7 +1190,7 @@ mod tests {
         };
         // The cursor at the end of the last block: that block moves.
         focus_scratchpad(&ws, cx);
-        cx.simulate_keystrokes("ctrl-end");
+        cx.simulate_keystrokes(INPUT_END);
         cx.simulate_keystrokes("secondary-enter");
         cx.run_until_parked();
         assert_eq!(page_text(cx), "Новый блок — 日本語.Page.");
@@ -1342,7 +1352,7 @@ mod tests {
         assert!(page_focused(&ws, cx));
         // Typing in the scratchpad, then page undo: the block comes back, the typing stays.
         focus_scratchpad(&ws, cx);
-        cx.simulate_keystrokes("ctrl-end");
+        cx.simulate_keystrokes(INPUT_END);
         cx.simulate_input(" more");
         ws.update_in(cx, |ws, window, cx| ws.focus_editor(window, cx));
         cx.simulate_keystrokes("secondary-z");
@@ -1382,7 +1392,7 @@ mod tests {
         cx.simulate_keystrokes("secondary-\\");
         cx.run_until_parked();
         focus_scratchpad(&ws, cx);
-        cx.simulate_keystrokes("ctrl-home right right");
+        cx.simulate_keystrokes(&format!("{INPUT_START} right right"));
         cx.simulate_input("XY");
         cx.run_until_parked();
         // Its own changes don't come back to it: the caret stays after the typing.
